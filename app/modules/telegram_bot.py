@@ -18,6 +18,8 @@ class TelegramBot:
         self.application = None
         self.is_running = False
         self.bot_username = None
+        self.polling_thread = None
+        self.loop = None
         logger.info("Telegram Bot initialized")
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -290,6 +292,10 @@ Trading involves risk. Only trade with money you can afford to lose.
         try:
             logger.info("🔄 Starting Telegram bot...")
             
+            # Create event loop in this thread
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+            
             # Create bot instance
             self.bot = Bot(token=self.token)
             self.application = Application.builder().token(self.token).build()
@@ -306,23 +312,23 @@ Trading involves risk. Only trade with money you can afford to lose.
             self.application.add_error_handler(self.error_handler)
             
             # Get bot username
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
             try:
-                bot_info = loop.run_until_complete(
+                bot_info = self.loop.run_until_complete(
                     asyncio.wait_for(self.bot.get_me(), timeout=10)
                 )
                 self.bot_username = bot_info.username
                 logger.info(f"✅ Bot username: @{self.bot_username}")
             except Exception as e:
                 logger.error(f"❌ Failed to get bot info: {e}")
-                logger.error("Check your TELEGRAM_TOKEN!")
                 return
             
-            # Start polling in a separate thread
+            # Start polling in a separate thread with its own event loop
             def run_polling():
                 try:
+                    # Create new event loop for this thread
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    
                     logger.info("🔄 Starting polling...")
                     self.application.run_polling(
                         poll_interval=1.0,
@@ -335,8 +341,8 @@ Trading involves risk. Only trade with money you can afford to lose.
                     time.sleep(30)
                     run_polling()  # Retry
             
-            polling_thread = threading.Thread(target=run_polling, daemon=True)
-            polling_thread.start()
+            self.polling_thread = threading.Thread(target=run_polling, daemon=True)
+            self.polling_thread.start()
             
             self.is_running = True
             logger.info("✅ Telegram bot started successfully!")
@@ -386,16 +392,30 @@ Place **{signal['direction']}** at **{bet_time_str}**
 ⚠️ Expiry: **{expiry_time}**
 """
                 
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(
-                    self.bot.send_message(
-                        chat_id=self.chat_id,
-                        text=message,
-                        parse_mode='Markdown'
+                # Use the main loop if available, or create a new one
+                if self.loop and self.loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(
+                        self.bot.send_message(
+                            chat_id=self.chat_id,
+                            text=message,
+                            parse_mode='Markdown'
+                        ),
+                        self.loop
                     )
-                )
+                    future.result(timeout=30)
+                else:
+                    # Fallback: create new loop
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    new_loop.run_until_complete(
+                        self.bot.send_message(
+                            chat_id=self.chat_id,
+                            text=message,
+                            parse_mode='Markdown'
+                        )
+                    )
+                    new_loop.close()
+                
                 logger.info(f"Signal sent: {signal['symbol']} - {signal['direction']}")
             
             signal_data = {
