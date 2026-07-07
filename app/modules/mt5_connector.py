@@ -93,5 +93,6 @@ class MT5Connector:
             'USDCHF': 0.89,
             'USDBRL': 5.80,
             'JODCNY': 9.20
+            'XAUUSD': 2350.0,
         }
         return base_prices.get(symbol, 100.0)
