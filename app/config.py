@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+import pytz
 
 load_dotenv()
 
@@ -26,6 +27,15 @@ class Config:
     
     # Logging
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+    
+    # Timezone - Erbil/Iraq (UTC+3)
+    TIMEZONE = pytz.timezone('Asia/Baghdad')  # Iraq timezone
+    
+    @classmethod
+    def get_current_time(cls):
+        """Get current time in Erbil/Iraq timezone"""
+        from datetime import datetime
+        return datetime.now(cls.TIMEZONE)
     
     @classmethod
     def validate(cls):
