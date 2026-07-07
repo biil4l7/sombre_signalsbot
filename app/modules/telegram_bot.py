@@ -1,7 +1,8 @@
 import asyncio
 import time
+import threading
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackContext
+from telegram.ext import Application, CommandHandler, ContextTypes
 from datetime import datetime, timedelta
 import json
 from app.utils.logger import logger
@@ -17,6 +18,35 @@ class TelegramBot:
         self.is_running = False
         self.bot_username = None
         logger.info("Telegram Bot initialized")
+        
+        # Auto-add admin user on startup
+        self._add_admin_user()
+    
+    def _add_admin_user(self):
+        """Auto-add admin user to database"""
+        try:
+            # Check if user already exists
+            existing = self.db.get_user_by_telegram_id("1669011045")
+            
+            if not existing or not existing['is_active']:
+                conn = self.db.get_connection()
+                cursor = conn.cursor()
+                
+                # Add admin user
+                cursor.execute('''
+                    INSERT OR REPLACE INTO users 
+                    (telegram_id, username, first_name, is_active, joined_at, last_active)
+                    VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ''', ("1669011045", "qSombre", "Bilal"))
+                
+                conn.commit()
+                conn.close()
+                logger.info("✅ Admin user 'Bilal' (qSombre) added to database")
+            else:
+                logger.info("✅ Admin user 'Bilal' already exists in database")
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to add admin user: {e}")
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
@@ -24,6 +54,36 @@ class TelegramBot:
         first_name = update.effective_user.first_name or "User"
         
         existing_user = self.db.get_user_by_telegram_id(str(user_id))
+        
+        # If user is admin, auto-join them
+        if str(user_id) == "1669011045":
+            if not existing_user or not existing_user['is_active']:
+                success, message = self.db.add_user_with_invite(
+                    username=username,
+                    telegram_id=str(user_id),
+                    first_name=first_name,
+                    invite_code=None
+                )
+                await update.message.reply_text(
+                    f"👑 **Welcome Admin {first_name}!**\n\n"
+                    f"You have been automatically added as an administrator.\n\n"
+                    f"📊 **Commands:**\n"
+                    f"/status - Check status\n"
+                    f"/stats - View statistics\n"
+                    f"/signals - Last 5 signals\n"
+                    f"/invite - Generate invite links\n"
+                    f"/help - Show all commands\n\n"
+                    f"🔗 Share this bot with friends using /invite",
+                    parse_mode='Markdown'
+                )
+                return
+            else:
+                await update.message.reply_text(
+                    f"👋 Welcome back Admin {first_name}!\n\n"
+                    "You're already a member.\n"
+                    "Use /status to check your status."
+                )
+                return
         
         if existing_user and existing_user['is_active']:
             await update.message.reply_text(
@@ -33,6 +93,7 @@ class TelegramBot:
             )
             return
         
+        # Check for invite code
         if context.args and context.args[0].startswith('invite_'):
             invite_code = context.args[0].replace('invite_', '')
             success, message = self.db.add_user_with_invite(
@@ -42,7 +103,8 @@ class TelegramBot:
                 invite_code=invite_code
             )
             
-            welcome = f"""
+            if success:
+                welcome = f"""
 {message}
 
 📊 **Commands:**
@@ -54,8 +116,11 @@ class TelegramBot:
 
 ⚠️ Risk Warning: Trading involves risk!
 """
-            await update.message.reply_text(welcome, parse_mode='Markdown')
-            return
+                await update.message.reply_text(welcome, parse_mode='Markdown')
+                return
+            else:
+                await update.message.reply_text(f"❌ {message}")
+                return
         
         await update.message.reply_text(
             f"👋 Welcome {first_name}!\n\n"
@@ -119,10 +184,13 @@ class TelegramBot:
         stats = self.db.get_statistics()
         users = self.db.get_user_count()
         
+        # Check if user is admin
+        is_admin = "👑 ADMIN" if user_id == "1669011045" else "👤 Member"
+        
         status_message = f"""
 📊 **Bot Status**
 ━━━━━━━━━━━━━━━━━━
-👤 **User:** {user['first_name']}
+{is_admin}: {user['first_name']} (@{user['username']})
 📅 **Joined:** {user['joined_at'][:10]}
 
 📈 **Performance (Last 7 days):**
@@ -219,6 +287,18 @@ Time: {time_str[:16]}
         username = update.effective_user.username or f"user_{user_id}"
         first_name = update.effective_user.first_name or "User"
         
+        # Auto-join for admin
+        if str(user_id) == "1669011045":
+            success, message = self.db.add_user_with_invite(
+                username=username,
+                telegram_id=str(user_id),
+                first_name=first_name,
+                invite_code=None
+            )
+            if success:
+                await update.message.reply_text(f"👑 {message}\n\n👥 Users: {self.db.get_user_count()}/{Config.MAX_USERS}")
+                return
+        
         existing_user = self.db.get_user_by_telegram_id(str(user_id))
         if existing_user and existing_user['is_active']:
             await update.message.reply_text("✅ You're already a member!")
@@ -238,6 +318,15 @@ Time: {time_str[:16]}
     
     async def leave_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
+        
+        # Prevent admin from leaving
+        if user_id == "1669011045":
+            await update.message.reply_text(
+                "❌ You are the admin. You cannot leave the group.\n"
+                "If you want to stop the bot, you can stop the service on Railway."
+            )
+            return
+        
         conn = self.db.get_connection()
         cursor = conn.cursor()
         cursor.execute('UPDATE users SET is_active = 0 WHERE telegram_id = ?', (user_id,))
@@ -282,7 +371,7 @@ Trading involves risk. Only trade with money you can afford to lose.
             await update.effective_message.reply_text("⚠️ An error occurred. Please try again.")
     
     def start(self):
-        """Start the Telegram bot using asyncio.run()"""
+        """Start the Telegram bot"""
         if self.is_running:
             return
         
@@ -314,10 +403,7 @@ Trading involves risk. Only trade with money you can afford to lose.
             asyncio.set_event_loop(loop)
             loop.run_until_complete(get_bot_info())
             
-            # Start polling in the main thread
-            logger.info("🔄 Starting polling...")
-            
-            # Run polling in the main thread
+            # Start polling in a separate thread
             def run_polling():
                 try:
                     # Create a new event loop for polling
@@ -351,7 +437,6 @@ Trading involves risk. Only trade with money you can afford to lose.
                     run_polling()  # Retry
             
             # Start polling in a thread
-            import threading
             polling_thread = threading.Thread(target=run_polling, daemon=True)
             polling_thread.start()
             
