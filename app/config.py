@@ -16,8 +16,7 @@ class Config:
     MIN_CONFIDENCE = int(os.getenv('MIN_CONFIDENCE', '60'))
     SIGNAL_TIMES = [int(x.strip()) for x in os.getenv('SIGNAL_TIMES', '3,5').split(',')]
     TIMEFRAME = os.getenv('TIMEFRAME', 'M1')
-    SYMBOLS = [x.strip() for x in os.getenv('SYMBOLS', 'USDJPY,USDCHF,USDBRL,JODCNY').split(',')]
-    
+    SYMBOLS = [x.strip() for x in os.getenv('SYMBOLS', 'USDJPY,USDCHF,USDBRL,JODCNY,XAUUSD').split(',')]
     # Invite System
     INVITE_CODE = os.getenv('INVITE_CODE', 'SOMMER2026')
     INVITE_LINK = os.getenv('INVITE_LINK', 'https://t.me/sombre_signal_bot?start=invite_SOMMER2026')
