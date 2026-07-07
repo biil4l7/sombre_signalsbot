@@ -4,11 +4,11 @@ import sys
 import time
 import signal
 import threading
+
+# Add the parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from datetime import datetime
-from app.config import Config
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from app.config import Config
 from app.utils.logger import logger
 from app.database.db_manager import DatabaseManager
@@ -78,7 +78,7 @@ class SignalBot:
     
     def _signal_loop(self):
         logger.info("🔄 Signal loop started")
-        check_interval = 60  # Check every 60 seconds
+        check_interval = 60
         
         while self.running:
             try:
@@ -88,19 +88,16 @@ class SignalBot:
                     if not self.running:
                         break
                     
-                    # Prevent duplicate signals (only 1 per symbol per 120 seconds)
                     if symbol in self.last_signal_time:
                         time_diff = (current_time - self.last_signal_time[symbol]).total_seconds()
                         if time_diff < 120:
                             continue
                     
-                    # Get market data
                     df = self.mt5.get_market_data(symbol, Config.TIMEFRAME, 100)
                     
                     if df is None or len(df) < 50:
                         continue
                     
-                    # Generate signal
                     signal = self.signal_generator.generate_signal(df, symbol)
                     
                     if signal and signal['direction'] != 'NEUTRAL':
@@ -112,12 +109,9 @@ class SignalBot:
                                 self.last_signal_time[symbol] = current_time
                                 logger.info(f"✅ Signal sent! (Total: {self.signals_sent})")
                             
-                            # Wait 10 seconds before next symbol
                             time.sleep(10)
                 
                 self.last_check_time = current_time
-                
-                # Wait before next check
                 time.sleep(check_interval)
                 
             except Exception as e:
