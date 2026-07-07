@@ -2,10 +2,12 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from app.utils.logger import logger
+from app.config import Config
 
 class SignalGenerator:
     def __init__(self):
         self.signal_history = []
+        self.last_signal_time = {}
         logger.info("Signal Generator initialized")
     
     def calculate_indicators(self, df):
@@ -55,7 +57,7 @@ class SignalGenerator:
             
             signal = {
                 'symbol': symbol,
-                'timestamp': datetime.now(),
+                'timestamp': Config.get_current_time(),
                 'price': float(latest['close']),
                 'confidence': 0,
                 'direction': 'NEUTRAL',
@@ -66,13 +68,15 @@ class SignalGenerator:
             score = 0
             indicators_triggered = []
             
+            # MA Crossover
             if latest['MA5'] > latest['MA20'] and prev['MA5'] <= prev['MA20']:
                 score += 20
-                indicators_triggered.append('MA Bullish')
+                indicators_triggered.append('MA Bullish Crossover')
             elif latest['MA5'] < latest['MA20'] and prev['MA5'] >= prev['MA20']:
                 score -= 20
-                indicators_triggered.append('MA Bearish')
+                indicators_triggered.append('MA Bearish Crossover')
             
+            # RSI
             if latest['RSI'] < 30:
                 score += 15
                 indicators_triggered.append('RSI Oversold')
@@ -80,6 +84,7 @@ class SignalGenerator:
                 score -= 15
                 indicators_triggered.append('RSI Overbought')
             
+            # MACD
             if latest['MACD'] > latest['MACD_signal'] and prev['MACD'] <= prev['MACD_signal']:
                 score += 15
                 indicators_triggered.append('MACD Bullish')
@@ -87,6 +92,7 @@ class SignalGenerator:
                 score -= 15
                 indicators_triggered.append('MACD Bearish')
             
+            # Bollinger Bands
             if latest['close'] <= latest['BB_lower']:
                 score += 10
                 indicators_triggered.append('At Lower Band')
@@ -94,6 +100,7 @@ class SignalGenerator:
                 score -= 10
                 indicators_triggered.append('At Upper Band')
             
+            # Stochastic
             if latest['STOCH_K'] < 20 and latest['STOCH_K'] > latest['STOCH_D']:
                 score += 10
                 indicators_triggered.append('Stochastic Bullish')
@@ -101,6 +108,7 @@ class SignalGenerator:
                 score -= 10
                 indicators_triggered.append('Stochastic Bearish')
             
+            # Trend
             if latest['close'] > latest['MA50']:
                 score += 10
                 indicators_triggered.append('Uptrend')
@@ -121,8 +129,12 @@ class SignalGenerator:
                 signal['direction'] = 'NEUTRAL'
                 signal['confidence'] = 0
             
-            return signal if signal['confidence'] >= 60 else None
+            # Log signal if valid
+            if signal['confidence'] >= Config.MIN_CONFIDENCE:
+                logger.info(f"📈 Signal: {symbol} - {signal['direction']} (Confidence: {signal['confidence']:.1f}%)")
+            
+            return signal if signal['confidence'] >= Config.MIN_CONFIDENCE else None
             
         except Exception as e:
-            logger.error(f"Error generating signal: {e}")
+            logger.error(f"Error generating signal for {symbol}: {e}")
             return None
