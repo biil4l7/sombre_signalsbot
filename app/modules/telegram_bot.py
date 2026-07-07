@@ -1,7 +1,7 @@
 import asyncio
 import time
 import threading
-from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes
 from datetime import datetime, timedelta
 import json
@@ -25,14 +25,12 @@ class TelegramBot:
     def _add_admin_user(self):
         """Auto-add admin user to database"""
         try:
-            # Check if user already exists
             existing = self.db.get_user_by_telegram_id("1669011045")
             
             if not existing or not existing['is_active']:
                 conn = self.db.get_connection()
                 cursor = conn.cursor()
                 
-                # Add admin user
                 cursor.execute('''
                     INSERT OR REPLACE INTO users 
                     (telegram_id, username, first_name, is_active, joined_at, last_active)
@@ -47,6 +45,16 @@ class TelegramBot:
                 
         except Exception as e:
             logger.error(f"❌ Failed to add admin user: {e}")
+    
+    def get_main_menu_keyboard(self):
+        """Create the main command keyboard (bottom left)"""
+        keyboard = [
+            [KeyboardButton("/start"), KeyboardButton("/invite")],
+            [KeyboardButton("/status"), KeyboardButton("/stats")],
+            [KeyboardButton("/signals"), KeyboardButton("/help")],
+            [KeyboardButton("/join"), KeyboardButton("/leave")]
+        ]
+        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
@@ -67,21 +75,23 @@ class TelegramBot:
                 await update.message.reply_text(
                     f"👑 **Welcome Admin {first_name}!**\n\n"
                     f"You have been automatically added as an administrator.\n\n"
-                    f"📊 **Commands:**\n"
+                    f"📊 **Commands Menu** (tap any button below):\n"
+                    f"/invite - Generate invite links\n"
                     f"/status - Check status\n"
                     f"/stats - View statistics\n"
                     f"/signals - Last 5 signals\n"
-                    f"/invite - Generate invite links\n"
                     f"/help - Show all commands\n\n"
                     f"🔗 Share this bot with friends using /invite",
-                    parse_mode='Markdown'
+                    parse_mode='Markdown',
+                    reply_markup=self.get_main_menu_keyboard()
                 )
                 return
             else:
                 await update.message.reply_text(
                     f"👋 Welcome back Admin {first_name}!\n\n"
                     "You're already a member.\n"
-                    "Use /status to check your status."
+                    "Tap a button below to get started.",
+                    reply_markup=self.get_main_menu_keyboard()
                 )
                 return
         
@@ -89,7 +99,8 @@ class TelegramBot:
             await update.message.reply_text(
                 f"👋 Welcome back {first_name}!\n\n"
                 "You're already a member.\n"
-                "Use /status to check your status."
+                "Tap a button below to get started.",
+                reply_markup=self.get_main_menu_keyboard()
             )
             return
         
@@ -107,7 +118,7 @@ class TelegramBot:
                 welcome = f"""
 {message}
 
-📊 **Commands:**
+📊 **Commands Menu** (tap any button below):
 /status - Check status
 /stats - View statistics
 /signals - Last 5 signals
@@ -116,7 +127,11 @@ class TelegramBot:
 
 ⚠️ Risk Warning: Trading involves risk!
 """
-                await update.message.reply_text(welcome, parse_mode='Markdown')
+                await update.message.reply_text(
+                    welcome,
+                    parse_mode='Markdown',
+                    reply_markup=self.get_main_menu_keyboard()
+                )
                 return
             else:
                 await update.message.reply_text(f"❌ {message}")
@@ -126,7 +141,8 @@ class TelegramBot:
             f"👋 Welcome {first_name}!\n\n"
             "This is a private signal bot.\n"
             "You need an invite link to join.\n\n"
-            "Contact the bot administrator for access."
+            "Contact the bot administrator for access.",
+            reply_markup=self.get_main_menu_keyboard()
         )
     
     async def invite_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -136,7 +152,8 @@ class TelegramBot:
         if not user or not user['is_active']:
             await update.message.reply_text(
                 "❌ You need to be a member to generate invite links.\n"
-                "Use a valid invite link to join first."
+                "Use a valid invite link to join first.",
+                reply_markup=self.get_main_menu_keyboard()
             )
             return
         
@@ -150,7 +167,10 @@ class TelegramBot:
                 bot_info = await context.bot.get_me()
                 self.bot_username = bot_info.username
             except:
-                await update.message.reply_text("❌ Error getting bot info. Please try again.")
+                await update.message.reply_text(
+                    "❌ Error getting bot info. Please try again.",
+                    reply_markup=self.get_main_menu_keyboard()
+                )
                 return
         
         invite_link, message = self.db.generate_invite_link(self.bot_username, code)
@@ -169,15 +189,27 @@ class TelegramBot:
                 parse_mode='Markdown',
                 reply_markup=reply_markup
             )
+            
+            # Also show the main menu after
+            await update.message.reply_text(
+                "📊 **Main Menu**",
+                reply_markup=self.get_main_menu_keyboard()
+            )
         else:
-            await update.message.reply_text(f"❌ {message}")
+            await update.message.reply_text(
+                f"❌ {message}",
+                reply_markup=self.get_main_menu_keyboard()
+            )
     
     async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         user = self.db.get_user_by_telegram_id(user_id)
         
         if not user or not user['is_active']:
-            await update.message.reply_text("❌ You're not a member. Use an invite link to join.")
+            await update.message.reply_text(
+                "❌ You're not a member. Use an invite link to join.",
+                reply_markup=self.get_main_menu_keyboard()
+            )
             return
         
         self.db.update_user_activity(user_id)
@@ -202,22 +234,22 @@ class TelegramBot:
 
 👥 **Group Stats:**
 • Active Users: {users}/{Config.MAX_USERS}
-
-📌 **Commands:**
-/invite - Generate invite link
-/status - Check status
-/stats - View statistics
-/signals - Last 5 signals
-/help - Show all commands
 """
-        await update.message.reply_text(status_message, parse_mode='Markdown')
+        await update.message.reply_text(
+            status_message,
+            parse_mode='Markdown',
+            reply_markup=self.get_main_menu_keyboard()
+        )
     
     async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         user = self.db.get_user_by_telegram_id(user_id)
         
         if not user or not user['is_active']:
-            await update.message.reply_text("❌ You're not a member.")
+            await update.message.reply_text(
+                "❌ You're not a member.",
+                reply_markup=self.get_main_menu_keyboard()
+            )
             return
         
         stats = self.db.get_statistics()
@@ -243,14 +275,21 @@ class TelegramBot:
 • Signals: {self.db.get_today_signals()}
 • Profit: ${self.db.get_today_profit():.2f}
 """
-        await update.message.reply_text(stats_message, parse_mode='Markdown')
+        await update.message.reply_text(
+            stats_message,
+            parse_mode='Markdown',
+            reply_markup=self.get_main_menu_keyboard()
+        )
     
     async def signals_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         user = self.db.get_user_by_telegram_id(user_id)
         
         if not user or not user['is_active']:
-            await update.message.reply_text("❌ You're not a member.")
+            await update.message.reply_text(
+                "❌ You're not a member.",
+                reply_markup=self.get_main_menu_keyboard()
+            )
             return
         
         conn = self.db.get_connection()
@@ -263,7 +302,10 @@ class TelegramBot:
         conn.close()
         
         if not signals:
-            await update.message.reply_text("📊 No signals yet.")
+            await update.message.reply_text(
+                "📊 No signals yet.\n\nThe bot is analyzing the markets and will send signals when conditions are right.",
+                reply_markup=self.get_main_menu_keyboard()
+            )
             return
         
         message = "📊 **Recent Signals**\n━━━━━━━━━━━━━━━━\n"
@@ -280,7 +322,11 @@ Result: {result_emoji}
 Profit: {profit_str}
 Time: {time_str[:16]}
 """
-        await update.message.reply_text(message, parse_mode='Markdown')
+        await update.message.reply_text(
+            message,
+            parse_mode='Markdown',
+            reply_markup=self.get_main_menu_keyboard()
+        )
     
     async def join_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
@@ -296,12 +342,18 @@ Time: {time_str[:16]}
                 invite_code=None
             )
             if success:
-                await update.message.reply_text(f"👑 {message}\n\n👥 Users: {self.db.get_user_count()}/{Config.MAX_USERS}")
+                await update.message.reply_text(
+                    f"👑 {message}\n\n👥 Users: {self.db.get_user_count()}/{Config.MAX_USERS}",
+                    reply_markup=self.get_main_menu_keyboard()
+                )
                 return
         
         existing_user = self.db.get_user_by_telegram_id(str(user_id))
         if existing_user and existing_user['is_active']:
-            await update.message.reply_text("✅ You're already a member!")
+            await update.message.reply_text(
+                "✅ You're already a member!",
+                reply_markup=self.get_main_menu_keyboard()
+            )
             return
         
         success, message = self.db.add_user_with_invite(
@@ -312,9 +364,15 @@ Time: {time_str[:16]}
         )
         
         if success:
-            await update.message.reply_text(f"{message}\n\n👥 Users: {self.db.get_user_count()}/{Config.MAX_USERS}")
+            await update.message.reply_text(
+                f"{message}\n\n👥 Users: {self.db.get_user_count()}/{Config.MAX_USERS}",
+                reply_markup=self.get_main_menu_keyboard()
+            )
         else:
-            await update.message.reply_text(f"❌ {message}\n\n💡 You need an invite link. Use /invite")
+            await update.message.reply_text(
+                f"❌ {message}\n\n💡 You need an invite link. Use /invite",
+                reply_markup=self.get_main_menu_keyboard()
+            )
     
     async def leave_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
@@ -323,7 +381,8 @@ Time: {time_str[:16]}
         if user_id == "1669011045":
             await update.message.reply_text(
                 "❌ You are the admin. You cannot leave the group.\n"
-                "If you want to stop the bot, you can stop the service on Railway."
+                "If you want to stop the bot, you can stop the service on Railway.",
+                reply_markup=self.get_main_menu_keyboard()
             )
             return
         
@@ -332,7 +391,11 @@ Time: {time_str[:16]}
         cursor.execute('UPDATE users SET is_active = 0 WHERE telegram_id = ?', (user_id,))
         conn.commit()
         conn.close()
-        await update.message.reply_text("✅ You have left the group.")
+        
+        await update.message.reply_text(
+            "✅ You have left the group.",
+            reply_markup=self.get_main_menu_keyboard()
+        )
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         help_message = """
@@ -363,12 +426,19 @@ Time: {time_str[:16]}
 ⚠️ **Risk Warning:**
 Trading involves risk. Only trade with money you can afford to lose.
 """
-        await update.message.reply_text(help_message, parse_mode='Markdown')
+        await update.message.reply_text(
+            help_message,
+            parse_mode='Markdown',
+            reply_markup=self.get_main_menu_keyboard()
+        )
     
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Telegram error: {context.error}")
         if update and update.effective_message:
-            await update.effective_message.reply_text("⚠️ An error occurred. Please try again.")
+            await update.effective_message.reply_text(
+                "⚠️ An error occurred. Please try again.",
+                reply_markup=self.get_main_menu_keyboard()
+            )
     
     def start(self):
         """Start the Telegram bot"""
