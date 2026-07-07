@@ -532,22 +532,24 @@ Trading involves risk. Only trade with money you can afford to lose.
         logger.info("Telegram bot stopped")
     
     def send_signal(self, signal, signal_times=[3, 5]):
+        """Send trading signal - sends ALL alerts continuously"""
         if not signal or signal['direction'] == 'NEUTRAL':
             return None
         
         try:
-            now = datetime.now()
-            bet_times = [now + timedelta(minutes=t) for t in signal_times]
+            # Get current time in Erbil timezone
+            now = Config.get_current_time()
             indicators_text = "\n".join([f"• {ind}" for ind in signal.get('indicators', [])])
             
+            # Send both alerts (3 min and 5 min)
             async def send_messages():
-                for i, bet_time in enumerate(bet_times):
-                    minutes = signal_times[i]
+                for minutes in signal_times:
+                    bet_time = now + timedelta(minutes=minutes)
                     bet_time_str = bet_time.strftime("%H:%M:%S")
                     expiry_time = (bet_time + timedelta(minutes=2)).strftime("%H:%M:%S")
                     
                     message = f"""
-🎯 **Signal Alert!** ({i+1}/{len(bet_times)})
+🎯 **Signal Alert!** ({minutes} min)
 ━━━━━━━━━━━━━━━━━━
 📊 **Symbol:** {signal['symbol']}-OTC
 📈 **Direction:** {signal['direction']}
@@ -564,13 +566,12 @@ Place **{signal['direction']}** at **{bet_time_str}**
 ⚠️ Expiry: **{expiry_time}**
 """
                     
-                    # Send message
                     await self.application.bot.send_message(
                         chat_id=self.chat_id,
                         text=message,
                         parse_mode='Markdown'
                     )
-                    logger.info(f"Signal sent: {signal['symbol']} - {signal['direction']}")
+                    logger.info(f"✅ Signal sent: {signal['symbol']} - {signal['direction']} ({minutes} min)")
             
             # Run the async function
             loop = asyncio.new_event_loop()
@@ -578,13 +579,14 @@ Place **{signal['direction']}** at **{bet_time_str}**
             loop.run_until_complete(send_messages())
             loop.close()
             
+            # Save to database
             signal_data = {
                 'symbol': signal['symbol'],
                 'direction': signal['direction'],
                 'entry_price': signal['price'],
-                'signal_time': datetime.now(),
-                'bet_time': bet_times[0],
-                'expiry_time': bet_times[0] + timedelta(minutes=2),
+                'signal_time': Config.get_current_time(),
+                'bet_time': Config.get_current_time() + timedelta(minutes=signal_times[0]),
+                'expiry_time': Config.get_current_time() + timedelta(minutes=signal_times[0] + 2),
                 'confidence': signal['confidence'],
                 'indicators': signal.get('indicators', [])
             }
