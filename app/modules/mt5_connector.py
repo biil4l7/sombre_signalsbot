@@ -9,6 +9,7 @@ class MT5Connector:
         self.last_data = {}
         self.trend_state = {}
         self.signal_counter = 0
+        self.last_signal_time = {}
         logger.info("MT5 Connector initialized")
     
     def connect(self):
@@ -21,77 +22,72 @@ class MT5Connector:
         logger.info("MT5 Disconnected")
     
     def get_market_data(self, symbol, timeframe="M1", bars=100):
-        """Generate realistic market data with trends"""
+        """Generate realistic market data with frequent signals"""
         
-        # Initialize trend state for this symbol
         if symbol not in self.trend_state:
             self.trend_state[symbol] = {
-                'trend': np.random.choice([-1, 1]),  # -1 down, 1 up
-                'strength': np.random.uniform(0.5, 1.5),
+                'trend': np.random.choice([-1, 1]),
+                'strength': np.random.uniform(0.8, 2.0),
                 'phase': 0,
-                'base_price': self._get_base_price(symbol)
+                'base_price': self._get_base_price(symbol),
+                'signal_count': 0
             }
         
         state = self.trend_state[symbol]
         
-        # Occasionally change trend (every 20-30 bars)
-        if np.random.random() < 0.03:  # 3% chance per bar
+        # Change trend more often for more signals (every 10-15 bars)
+        if np.random.random() < 0.05:  # 5% chance per bar
             state['trend'] *= -1
-            state['strength'] = np.random.uniform(0.5, 1.5)
+            state['strength'] = np.random.uniform(0.8, 2.0)
             logger.info(f"🔄 Trend changed for {symbol}: {'UP' if state['trend'] == 1 else 'DOWN'}")
         
-        # Generate price data with realistic movements
+        # Generate price data with clearer trends
         prices = []
         current_price = state['base_price']
         
         for i in range(bars):
-            # Add trend component
-            trend_move = state['trend'] * state['strength'] * 0.002 * current_price
+            # Stronger trend component
+            trend_move = state['trend'] * state['strength'] * 0.003 * current_price
             
-            # Add random noise
-            noise = np.random.normal(0, 0.002) * current_price
+            # Random noise
+            noise = np.random.normal(0, 0.0015) * current_price
             
-            # Add occasional spikes (like real markets)
-            if np.random.random() < 0.02:  # 2% chance of spike
-                spike = np.random.choice([-1, 1]) * 0.01 * current_price
+            # Occasional spikes
+            if np.random.random() < 0.03:  # 3% chance
+                spike = np.random.choice([-1, 1]) * 0.015 * current_price
             else:
                 spike = 0
             
-            # Calculate new price
             change = trend_move + noise + spike
             current_price += change
             
-            # Keep price reasonable
-            if current_price < state['base_price'] * 0.95:
-                current_price = state['base_price'] * 0.95
-                state['trend'] = 1  # Bounce up
-            elif current_price > state['base_price'] * 1.05:
-                current_price = state['base_price'] * 1.05
-                state['trend'] = -1  # Bounce down
+            # Keep price in reasonable range
+            if current_price < state['base_price'] * 0.92:
+                current_price = state['base_price'] * 0.92
+                state['trend'] = 1
+            elif current_price > state['base_price'] * 1.08:
+                current_price = state['base_price'] * 1.08
+                state['trend'] = -1
             
             prices.append(current_price)
         
-        # Update base price for next run
         state['base_price'] = prices[-1]
         
-        # Create DataFrame
         df = pd.DataFrame({
             'open': prices,
-            'high': [p * (1 + np.random.uniform(0, 0.003)) for p in prices],
-            'low': [p * (1 - np.random.uniform(0, 0.003)) for p in prices],
+            'high': [p * (1 + np.random.uniform(0, 0.004)) for p in prices],
+            'low': [p * (1 - np.random.uniform(0, 0.004)) for p in prices],
             'close': prices,
             'volume': np.random.randint(100, 1000, bars)
         })
         
-        # Log if we're getting good signals
         self.signal_counter += 1
-        if self.signal_counter % 5 == 0:
-            logger.info(f"📊 {symbol} - Current price: {prices[-1]:.4f}, Trend: {'UP' if state['trend'] == 1 else 'DOWN'}")
+        if self.signal_counter % 3 == 0:
+            logger.info(f"📊 {symbol} - Price: {prices[-1]:.4f}, Trend: {'UP' if state['trend'] == 1 else 'DOWN'}")
         
         return df
     
     def _get_base_price(self, symbol):
-        """Get base price for each symbol"""
         base_prices = {
             'USDJPY': 145.0,
             'USDCHF': 0.89,
