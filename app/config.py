@@ -1,8 +1,6 @@
 import os
 from dotenv import load_dotenv
-import logging
 
-# Load environment variables
 load_dotenv()
 
 class Config:
@@ -20,8 +18,8 @@ class Config:
     SYMBOLS = [x.strip() for x in os.getenv('SYMBOLS', 'USDJPY,USDCHF,USDBRL,JODCNY').split(',')]
     
     # Invite System
-    INVITE_CODE = os.getenv('INVITE_CODE', 'MYBOT2026')
-    INVITE_LINK = os.getenv('INVITE_LINK', 'https://t.me/YourBotUsername?start=invite_MYBOT2026')
+    INVITE_CODE = os.getenv('INVITE_CODE', 'SOMMER2026')
+    INVITE_LINK = os.getenv('INVITE_LINK', 'https://t.me/sombre_signal_bot?start=invite_SOMMER2026')
     
     # Database
     DATABASE_PATH = os.getenv('DATABASE_PATH', 'data/signals.db')
