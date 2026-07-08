@@ -87,22 +87,24 @@ class SignalBot:
         logger.info("✅ Bot stopped")
     
     def _signal_loop(self):
-        """Main signal generation loop"""
-        logger.info("🔄 Signal loop started")
-        check_interval = 60  # Check every 60 seconds
+        """Main signal generation loop - sends signals for ALL symbols"""
+        logger.info("🔄 Signal loop started - checking all symbols...")
+        check_interval = 30  # Check every 30 seconds (faster)
         
         while self.running:
             try:
                 current_time = Config.get_current_time()
+                signals_found = []
                 
+                # Check ALL symbols for signals
                 for symbol in Config.SYMBOLS:
                     if not self.running:
                         break
                     
-                    # Prevent duplicate signals (only 1 per symbol per 120 seconds)
+                    # Skip if we just sent a signal for this symbol (cooldown)
                     if symbol in self.last_signal_time:
                         time_diff = (current_time - self.last_signal_time[symbol]).total_seconds()
-                        if time_diff < 120:
+                        if time_diff < 180:  # 3 minute cooldown per symbol
                             continue
                     
                     # Get market data
@@ -116,15 +118,26 @@ class SignalBot:
                     
                     if signal and signal['direction'] != 'NEUTRAL':
                         if signal['confidence'] >= Config.MIN_CONFIDENCE:
-                            logger.info(f"🎯 Signal: {symbol} - {signal['direction']} ({signal['confidence']:.1f}%)")
-                            signal_id = self.telegram.send_signal(signal, Config.SIGNAL_TIMES)
-                            if signal_id:
-                                self.signals_sent += 1
-                                self.last_signal_time[symbol] = current_time
-                                logger.info(f"✅ Signal sent! (Total: {self.signals_sent})")
-                            
-                            # Wait 10 seconds before next symbol
-                            time.sleep(10)
+                            signals_found.append(signal)
+                            logger.info(f"🎯 Signal found: {symbol} - {signal['direction']} ({signal['confidence']:.1f}%)")
+                
+                # Send ALL signals found
+                for signal in signals_found:
+                    if not self.running:
+                        break
+                    
+                    signal_id = self.telegram.send_signal(signal, Config.SIGNAL_TIMES)
+                    if signal_id:
+                        self.signals_sent += 1
+                        self.last_signal_time[signal['symbol']] = current_time
+                        logger.info(f"✅ Signal sent: {signal['symbol']} - {signal['direction']} (Total: {self.signals_sent})")
+                    
+                    # Small delay between signals
+                    time.sleep(3)
+                
+                # Log if no signals found
+                if not signals_found:
+                    logger.debug("No signals found in this cycle")
                 
                 self.last_check_time = current_time
                 
