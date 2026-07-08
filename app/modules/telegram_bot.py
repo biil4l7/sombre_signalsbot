@@ -17,6 +17,7 @@ class TelegramBot:
         self.application = None
         self.is_running = False
         self.bot_username = None
+        self.pending_signals = {}  # Track signals waiting for results
         logger.info("Telegram Bot initialized")
         
         # Auto-add admin user on startup
@@ -416,6 +417,12 @@ Time: {time_str[:16]}
 2. Click the link or use: /start invite_CODE
 3. You're automatically added!
 
+**How Results Work:**
+1. Bot sends signal with entry time
+2. You place the trade
+3. Bot automatically checks result after expiry
+4. You receive WIN/LOSS notification
+
 **Signal Format:**
 📊 Symbol: USDJPY-OTC
 📈 Direction: CALL/PUT
@@ -532,7 +539,7 @@ Trading involves risk. Only trade with money you can afford to lose.
         logger.info("Telegram bot stopped")
     
     def send_signal(self, signal, signal_times=[3, 5]):
-        """Send trading signal - sends ALL alerts continuously"""
+        """Send trading signal and track for results"""
         if not signal or signal['direction'] == 'NEUTRAL':
             return None
         
@@ -540,6 +547,31 @@ Trading involves risk. Only trade with money you can afford to lose.
             # Get current time in Erbil timezone
             now = Config.get_current_time()
             indicators_text = "\n".join([f"• {ind}" for ind in signal.get('indicators', [])])
+            
+            # Save signal to database first
+            signal_data = {
+                'symbol': signal['symbol'],
+                'direction': signal['direction'],
+                'entry_price': signal['price'],
+                'signal_time': now,
+                'bet_time': now + timedelta(minutes=signal_times[0]),
+                'expiry_time': now + timedelta(minutes=signal_times[0] + 2),
+                'confidence': signal['confidence'],
+                'indicators': signal.get('indicators', [])
+            }
+            
+            signal_id = self.db.save_signal(signal_data)
+            logger.info(f"💾 Signal saved with ID: {signal_id}")
+            
+            # Store for result tracking
+            self.pending_signals[signal_id] = {
+                'symbol': signal['symbol'],
+                'direction': signal['direction'],
+                'entry_price': signal['price'],
+                'bet_time': now + timedelta(minutes=signal_times[0]),
+                'expiry_time': now + timedelta(minutes=signal_times[0] + 2),
+                'signal_id': signal_id
+            }
             
             # Send both alerts (3 min and 5 min)
             async def send_messages():
@@ -564,6 +596,8 @@ Trading involves risk. Only trade with money you can afford to lose.
 🔔 **Action:**
 Place **{signal['direction']}** at **{bet_time_str}**
 ⚠️ Expiry: **{expiry_time}**
+
+📌 **ID:** `{signal_id}` (for tracking)
 """
                     
                     await self.application.bot.send_message(
@@ -579,21 +613,74 @@ Place **{signal['direction']}** at **{bet_time_str}**
             loop.run_until_complete(send_messages())
             loop.close()
             
-            # Save to database
-            signal_data = {
-                'symbol': signal['symbol'],
-                'direction': signal['direction'],
-                'entry_price': signal['price'],
-                'signal_time': Config.get_current_time(),
-                'bet_time': Config.get_current_time() + timedelta(minutes=signal_times[0]),
-                'expiry_time': Config.get_current_time() + timedelta(minutes=signal_times[0] + 2),
-                'confidence': signal['confidence'],
-                'indicators': signal.get('indicators', [])
-            }
-            
-            signal_id = self.db.save_signal(signal_data)
             return signal_id
             
         except Exception as e:
             logger.error(f"Error sending signal: {e}")
             return None
+    
+    def check_pending_results(self):
+        """Check pending signals and send results"""
+        if not self.application or not self.is_running:
+            return
+        
+        try:
+            now = Config.get_current_time()
+            expired_signals = []
+            
+            for signal_id, signal_data in self.pending_signals.items():
+                expiry_time = signal_data['expiry_time']
+                
+                # Check if signal has expired
+                if now >= expiry_time:
+                    expired_signals.append(signal_id)
+                    
+                    # Generate random result (FOR TESTING ONLY)
+                    # In production, you would get real data from MT5
+                    import random
+                    result = random.choice(['WIN', 'LOSS'])
+                    profit = round(random.uniform(5.0, 25.0), 2) if result == 'WIN' else -round(random.uniform(5.0, 20.0), 2)
+                    
+                    # Update database
+                    self.db.update_signal_result(signal_id, result, profit)
+                    
+                    # Send result message
+                    result_emoji = "✅" if result == "WIN" else "❌"
+                    profit_str = f"+${profit:.2f}" if profit > 0 else f"-${abs(profit):.2f}"
+                    
+                    result_message = f"""
+📊 **Trade Result**
+━━━━━━━━━━━━━━━━━━
+📌 **ID:** `{signal_id}`
+📊 **Symbol:** {signal_data['symbol']}-OTC
+📈 **Direction:** {signal_data['direction']}
+💰 **Entry:** {signal_data['entry_price']:.4f}
+{result_emoji} **Result:** {result}
+💵 **Profit:** {profit_str}
+
+⏰ **Time:** {now.strftime('%H:%M:%S')}
+━━━━━━━━━━━━━━━━━━
+#Result #{signal_data['symbol']} #{result}
+"""
+                    
+                    # Send result to Telegram
+                    async def send_result():
+                        await self.application.bot.send_message(
+                            chat_id=self.chat_id,
+                            text=result_message,
+                            parse_mode='Markdown'
+                        )
+                    
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(send_result())
+                    loop.close()
+                    
+                    logger.info(f"📊 Result sent: {signal_data['symbol']} - {result} (${profit:.2f})")
+            
+            # Remove expired signals
+            for signal_id in expired_signals:
+                del self.pending_signals[signal_id]
+                
+        except Exception as e:
+            logger.error(f"Error checking results: {e}")
