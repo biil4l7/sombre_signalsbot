@@ -4,11 +4,11 @@ import sys
 import time
 import signal
 import threading
+from datetime import datetime
 
 # Add the parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from datetime import datetime
 from app.config import Config
 from app.utils.logger import logger
 from app.database.db_manager import DatabaseManager
@@ -38,6 +38,7 @@ class SignalBot:
         
         self.running = False
         self.signal_loop_thread = None
+        self.result_checker_thread = None
         self.signals_sent = 0
         self.last_check_time = None
         self.last_signal_time = {}
@@ -55,12 +56,18 @@ class SignalBot:
         
         self.mt5.connect()
         
+        # Start Telegram bot
         telegram_thread = threading.Thread(target=self.telegram.start, daemon=True)
         telegram_thread.start()
         time.sleep(2)
         
+        # Start signal generation loop
         self.signal_loop_thread = threading.Thread(target=self._signal_loop, daemon=True)
         self.signal_loop_thread.start()
+        
+        # Start result checker loop
+        self.result_checker_thread = threading.Thread(target=self._result_checker_loop, daemon=True)
+        self.result_checker_thread.start()
         
         logger.info("✅ Bot started!")
         self._print_status()
@@ -74,11 +81,15 @@ class SignalBot:
         if self.signal_loop_thread and self.signal_loop_thread.is_alive():
             self.signal_loop_thread.join(timeout=5)
         
+        if self.result_checker_thread and self.result_checker_thread.is_alive():
+            self.result_checker_thread.join(timeout=5)
+        
         logger.info("✅ Bot stopped")
     
     def _signal_loop(self):
+        """Main signal generation loop"""
         logger.info("🔄 Signal loop started")
-        check_interval = 60
+        check_interval = 60  # Check every 60 seconds
         
         while self.running:
             try:
@@ -88,16 +99,19 @@ class SignalBot:
                     if not self.running:
                         break
                     
+                    # Prevent duplicate signals (only 1 per symbol per 120 seconds)
                     if symbol in self.last_signal_time:
                         time_diff = (current_time - self.last_signal_time[symbol]).total_seconds()
                         if time_diff < 120:
                             continue
                     
+                    # Get market data
                     df = self.mt5.get_market_data(symbol, Config.TIMEFRAME, 100)
                     
                     if df is None or len(df) < 50:
                         continue
                     
+                    # Generate signal
                     signal = self.signal_generator.generate_signal(df, symbol)
                     
                     if signal and signal['direction'] != 'NEUTRAL':
@@ -109,15 +123,32 @@ class SignalBot:
                                 self.last_signal_time[symbol] = current_time
                                 logger.info(f"✅ Signal sent! (Total: {self.signals_sent})")
                             
+                            # Wait 10 seconds before next symbol
                             time.sleep(10)
                 
                 self.last_check_time = current_time
+                
+                # Wait before next check
                 time.sleep(check_interval)
                 
             except Exception as e:
                 logger.error(f"Error in signal loop: {e}")
                 import traceback
                 logger.error(traceback.format_exc())
+                time.sleep(30)
+    
+    def _result_checker_loop(self):
+        """Check for expired signals and send results"""
+        logger.info("🔄 Result checker loop started")
+        
+        while self.running:
+            try:
+                # Check pending signals every 30 seconds
+                self.telegram.check_pending_results()
+                time.sleep(30)
+                
+            except Exception as e:
+                logger.error(f"Error in result checker: {e}")
                 time.sleep(30)
     
     def _print_status(self):
