@@ -6,7 +6,6 @@ import signal
 import threading
 from datetime import datetime
 
-# Add the parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import Config
@@ -20,7 +19,8 @@ from app.modules.user_manager import UserManager
 class SignalBot:
     def __init__(self):
         logger.info("=" * 60)
-        logger.info("🚀 Sombre Signals Bot v3.0")
+        logger.info("🚀 XAUUSD Signal Bot v3.0")
+        logger.info("📊 Only monitoring: XAUUSD (Gold)")
         logger.info("=" * 60)
         
         try:
@@ -41,9 +41,7 @@ class SignalBot:
         self.result_checker_thread = None
         self.signals_sent = 0
         self.last_check_time = None
-        self.last_signal_time = {}
         
-        logger.info(f"📊 Monitoring: {', '.join(Config.SYMBOLS)}")
         logger.info(f"👥 Max Users: {Config.MAX_USERS}")
         logger.info(f"⏰ Timezone: {Config.TIMEZONE}")
     
@@ -56,16 +54,13 @@ class SignalBot:
         
         self.mt5.connect()
         
-        # Start Telegram bot
         telegram_thread = threading.Thread(target=self.telegram.start, daemon=True)
         telegram_thread.start()
         time.sleep(2)
         
-        # Start signal generation loop
         self.signal_loop_thread = threading.Thread(target=self._signal_loop, daemon=True)
         self.signal_loop_thread.start()
         
-        # Start result checker loop
         self.result_checker_thread = threading.Thread(target=self._result_checker_loop, daemon=True)
         self.result_checker_thread.start()
         
@@ -87,61 +82,31 @@ class SignalBot:
         logger.info("✅ Bot stopped")
     
     def _signal_loop(self):
-        """Main signal generation loop - sends signals for ALL symbols"""
-        logger.info("🔄 Signal loop started - checking all symbols...")
-        check_interval = 30  # Check every 30 seconds (faster)
+        """Signal loop for XAUUSD only"""
+        logger.info("🔄 Signal loop started - monitoring XAUUSD...")
+        check_interval = 30  # Check every 30 seconds
         
         while self.running:
             try:
                 current_time = Config.get_current_time()
-                signals_found = []
+                symbol = 'XAUUSD'
                 
-                # Check ALL symbols for signals
-                for symbol in Config.SYMBOLS:
-                    if not self.running:
-                        break
-                    
-                    # Skip if we just sent a signal for this symbol (cooldown)
-                    if symbol in self.last_signal_time:
-                        time_diff = (current_time - self.last_signal_time[symbol]).total_seconds()
-                        if time_diff < 180:  # 3 minute cooldown per symbol
-                            continue
-                    
-                    # Get market data
-                    df = self.mt5.get_market_data(symbol, Config.TIMEFRAME, 100)
-                    
-                    if df is None or len(df) < 50:
-                        continue
-                    
+                # Get market data
+                df = self.mt5.get_market_data(symbol, Config.TIMEFRAME, 100)
+                
+                if df is not None and len(df) >= 50:
                     # Generate signal
                     signal = self.signal_generator.generate_signal(df, symbol)
                     
                     if signal and signal['direction'] != 'NEUTRAL':
                         if signal['confidence'] >= Config.MIN_CONFIDENCE:
-                            signals_found.append(signal)
-                            logger.info(f"🎯 Signal found: {symbol} - {signal['direction']} ({signal['confidence']:.1f}%)")
-                
-                # Send ALL signals found
-                for signal in signals_found:
-                    if not self.running:
-                        break
-                    
-                    signal_id = self.telegram.send_signal(signal, Config.SIGNAL_TIMES)
-                    if signal_id:
-                        self.signals_sent += 1
-                        self.last_signal_time[signal['symbol']] = current_time
-                        logger.info(f"✅ Signal sent: {signal['symbol']} - {signal['direction']} (Total: {self.signals_sent})")
-                    
-                    # Small delay between signals
-                    time.sleep(3)
-                
-                # Log if no signals found
-                if not signals_found:
-                    logger.debug("No signals found in this cycle")
+                            logger.info(f"🎯 XAUUSD Signal: {signal['direction']} ({signal['confidence']:.1f}%)")
+                            signal_id = self.telegram.send_signal(signal, Config.SIGNAL_TIMES)
+                            if signal_id:
+                                self.signals_sent += 1
+                                logger.info(f"✅ XAUUSD Signal sent! (Total: {self.signals_sent})")
                 
                 self.last_check_time = current_time
-                
-                # Wait before next check
                 time.sleep(check_interval)
                 
             except Exception as e:
@@ -156,26 +121,23 @@ class SignalBot:
         
         while self.running:
             try:
-                # Check pending signals every 30 seconds
                 self.telegram.check_pending_results()
                 time.sleep(30)
-                
             except Exception as e:
                 logger.error(f"Error in result checker: {e}")
                 time.sleep(30)
     
     def _print_status(self):
-        users = self.user_manager.get_users()
         user_count = self.user_manager.get_user_count()
         stats = self.db.get_statistics()
         current_time = Config.get_current_time().strftime("%H:%M:%S")
         
         status = f"""
 ╔═══════════════════════════════════════════════════════════╗
-║              SOMBRE SIGNALS BOT - RUNNING                ║
+║              XAUUSD SIGNAL BOT - RUNNING                ║
 ╠═══════════════════════════════════════════════════════════╣
 ║ ✅ Status: Online                        Time: {current_time}    ║
-║ 📊 Symbols: {', '.join(Config.SYMBOLS):<40} ║
+║ 📊 Symbol: XAUUSD (Gold)                                  ║
 ║ 👥 Users: {user_count}/{Config.MAX_USERS:<2}                                                ║
 ║ 🏆 Win Rate: {stats['win_rate']:.1f}%                                                 ║
 ║ 📈 Signals Sent: {self.signals_sent}                                                ║
