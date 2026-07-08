@@ -37,10 +37,7 @@ class SignalBot:
         self.telegram = TelegramBot(self.db, self.signal_generator)
         
         self.running = False
-        self.signal_loop_thread = None
-        self.result_checker_thread = None
         self.signals_sent = 0
-        self.last_check_time = None
         
         logger.info(f"👥 Max Users: {Config.MAX_USERS}")
         logger.info(f"⏰ Timezone: {Config.TIMEZONE}")
@@ -54,15 +51,18 @@ class SignalBot:
         
         self.mt5.connect()
         
+        # Start Telegram bot
         telegram_thread = threading.Thread(target=self.telegram.start, daemon=True)
         telegram_thread.start()
-        time.sleep(2)
+        time.sleep(3)  # Wait for Telegram to start
         
-        self.signal_loop_thread = threading.Thread(target=self._signal_loop, daemon=True)
-        self.signal_loop_thread.start()
+        # Start signal loop
+        signal_thread = threading.Thread(target=self._signal_loop, daemon=True)
+        signal_thread.start()
         
-        self.result_checker_thread = threading.Thread(target=self._result_checker_loop, daemon=True)
-        self.result_checker_thread.start()
+        # Start result checker
+        result_thread = threading.Thread(target=self._result_checker_loop, daemon=True)
+        result_thread.start()
         
         logger.info("✅ Bot started!")
         self._print_status()
@@ -72,22 +72,14 @@ class SignalBot:
         self.running = False
         self.mt5.disconnect()
         self.telegram.stop()
-        
-        if self.signal_loop_thread and self.signal_loop_thread.is_alive():
-            self.signal_loop_thread.join(timeout=5)
-        
-        if self.result_checker_thread and self.result_checker_thread.is_alive():
-            self.result_checker_thread.join(timeout=5)
-        
         logger.info("✅ Bot stopped")
     
     def _signal_loop(self):
-        """Continuous signal loop for XAUUSD - NO COOLDOWN"""
-        logger.info("🔄 Signal loop started - monitoring XAUUSD continuously...")
+        """Continuous XAUUSD signals - EVERY 10 SECONDS"""
+        logger.info("🔄 XAUUSD Signal loop started - checking every 10 seconds...")
         
         while self.running:
             try:
-                current_time = Config.get_current_time()
                 symbol = 'XAUUSD'
                 
                 # Get market data
@@ -105,28 +97,26 @@ class SignalBot:
                                 self.signals_sent += 1
                                 logger.info(f"✅ XAUUSD Signal sent! (Total: {self.signals_sent})")
                 
-                self.last_check_time = current_time
-                
-                # Check every 15 seconds for more signals (faster!)
-                time.sleep(15)
+                # Check every 10 seconds for FAST signals
+                time.sleep(10)
                 
             except Exception as e:
                 logger.error(f"Error in signal loop: {e}")
                 import traceback
                 logger.error(traceback.format_exc())
-                time.sleep(10)
+                time.sleep(5)
     
     def _result_checker_loop(self):
-        """Check for expired signals and send results"""
+        """Check for expired signals"""
         logger.info("🔄 Result checker loop started")
         
         while self.running:
             try:
                 self.telegram.check_pending_results()
-                time.sleep(20)  # Check every 20 seconds
+                time.sleep(15)
             except Exception as e:
                 logger.error(f"Error in result checker: {e}")
-                time.sleep(20)
+                time.sleep(15)
     
     def _print_status(self):
         user_count = self.user_manager.get_user_count()
@@ -140,7 +130,6 @@ class SignalBot:
 ║ ✅ Status: Online                        Time: {current_time}    ║
 ║ 📊 Symbol: XAUUSD (Gold)                                  ║
 ║ 👥 Users: {user_count}/{Config.MAX_USERS:<2}                                                ║
-║ 🏆 Win Rate: {stats['win_rate']:.1f}%                                                 ║
 ║ 📈 Signals Sent: {self.signals_sent}                                                ║
 ║ ⏰ Timezone: Erbil/Iraq (UTC+3)                                        ║
 ║ 🔗 Invite: @sombre_signal_bot                                        ║
