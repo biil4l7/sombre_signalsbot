@@ -82,9 +82,8 @@ class SignalBot:
         logger.info("✅ Bot stopped")
     
     def _signal_loop(self):
-        """Signal loop for XAUUSD only"""
-        logger.info("🔄 Signal loop started - monitoring XAUUSD...")
-        check_interval = 30  # Check every 30 seconds
+        """Continuous signal loop for XAUUSD - NO COOLDOWN"""
+        logger.info("🔄 Signal loop started - monitoring XAUUSD continuously...")
         
         while self.running:
             try:
@@ -107,13 +106,15 @@ class SignalBot:
                                 logger.info(f"✅ XAUUSD Signal sent! (Total: {self.signals_sent})")
                 
                 self.last_check_time = current_time
-                time.sleep(check_interval)
+                
+                # Check every 15 seconds for more signals (faster!)
+                time.sleep(15)
                 
             except Exception as e:
                 logger.error(f"Error in signal loop: {e}")
                 import traceback
                 logger.error(traceback.format_exc())
-                time.sleep(30)
+                time.sleep(10)
     
     def _result_checker_loop(self):
         """Check for expired signals and send results"""
@@ -122,10 +123,10 @@ class SignalBot:
         while self.running:
             try:
                 self.telegram.check_pending_results()
-                time.sleep(30)
+                time.sleep(20)  # Check every 20 seconds
             except Exception as e:
                 logger.error(f"Error in result checker: {e}")
-                time.sleep(30)
+                time.sleep(20)
     
     def _print_status(self):
         user_count = self.user_manager.get_user_count()
