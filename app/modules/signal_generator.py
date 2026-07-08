@@ -8,6 +8,7 @@ class SignalGenerator:
     def __init__(self):
         self.signal_history = []
         self.last_signal_time = {}
+        self.symbol_scores = {}  # Track scores per symbol
         logger.info("Signal Generator initialized")
     
     def calculate_indicators(self, df):
@@ -129,9 +130,9 @@ class SignalGenerator:
                 signal['direction'] = 'NEUTRAL'
                 signal['confidence'] = 0
             
-            # Log signal if valid
+            # Log if signal is valid
             if signal['confidence'] >= Config.MIN_CONFIDENCE:
-                logger.info(f"📈 Signal: {symbol} - {signal['direction']} (Confidence: {signal['confidence']:.1f}%)")
+                logger.info(f"📈 Signal: {symbol} - {signal['direction']} (Confidence: {signal['confidence']:.1f}%, Score: {score})")
             
             return signal if signal['confidence'] >= Config.MIN_CONFIDENCE else None
             
