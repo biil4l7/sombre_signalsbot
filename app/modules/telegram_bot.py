@@ -17,7 +17,6 @@ class TelegramBot:
         self.is_running = False
         self.bot_username = None
         self.pending_signals = {}
-        self._polling_thread = None
         logger.info("Telegram Bot initialized")
         self._add_admin_user()
     
@@ -196,19 +195,14 @@ class TelegramBot:
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Telegram error: {context.error}")
     
-    # ========== POLLING START ==========
+    # ========== START ==========
     def start(self):
-        """Start the Telegram bot with reliable polling"""
+        """Start the bot with simple polling - no complex threading"""
         if self.is_running:
             return
-        
         try:
             logger.info("🔄 Starting Telegram bot...")
-            
-            # Build application
             self.application = Application.builder().token(self.token).build()
-            
-            # Add all handlers
             self.application.add_handler(CommandHandler("start", self.start_command))
             self.application.add_handler(CommandHandler("invite", self.invite_command))
             self.application.add_handler(CommandHandler("join", self.join_command))
@@ -219,65 +213,45 @@ class TelegramBot:
             self.application.add_handler(CommandHandler("help", self.help_command))
             self.application.add_error_handler(self.error_handler)
             
-            # Define the polling function that runs in its own thread
-            def polling_worker():
+            # Start polling in a thread using the application's built-in method
+            def run():
                 try:
-                    # Create a new event loop for this thread
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    
-                    # Initialize the application
-                    loop.run_until_complete(self.application.initialize())
-                    loop.run_until_complete(self.application.start())
-                    
-                    # Get bot info
-                    bot_info = loop.run_until_complete(self.application.bot.get_me())
-                    self.bot_username = bot_info.username
-                    logger.info(f"✅ Bot: @{self.bot_username}")
-                    
-                    # Start polling (this will run forever)
                     logger.info("🔄 Polling started...")
-                    loop.run_until_complete(
-                        self.application.updater.start_polling(
-                            poll_interval=1.0,
-                            timeout=30,
-                            drop_pending_updates=True,
-                            allowed_updates=["message", "callback_query"]
-                        )
+                    self.application.run_polling(
+                        poll_interval=1.0,
+                        timeout=30,
+                        drop_pending_updates=True,
+                        allowed_updates=["message", "callback_query"]
                     )
-                    # Keep the loop running
-                    loop.run_forever()
-                    
                 except Exception as e:
-                    logger.error(f"❌ Polling worker error: {e}")
-                    import traceback
-                    logger.error(traceback.format_exc())
+                    logger.error(f"❌ Polling error: {e}")
                     time.sleep(5)
-                    # Restart polling
-                    polling_worker()
+                    run()
             
-            # Start the polling in a daemon thread
-            self._polling_thread = threading.Thread(target=polling_worker, daemon=True)
-            self._polling_thread.start()
+            thread = threading.Thread(target=run, daemon=True)
+            thread.start()
+            
+            # Get bot info (optional)
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                bot_info = loop.run_until_complete(self.application.bot.get_me())
+                self.bot_username = bot_info.username
+                loop.close()
+                logger.info(f"✅ Bot: @{self.bot_username}")
+            except:
+                pass
             
             self.is_running = True
-            logger.info("✅ Telegram bot started! Commands should be processed.")
-            
+            logger.info("✅ Telegram bot started! Commands are now active.")
         except Exception as e:
-            logger.error(f"❌ Failed to start Telegram bot: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
+            logger.error(f"❌ Failed to start: {e}")
             self.is_running = False
     
     def stop(self):
         if self.application:
             try:
-                # Shut down properly
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(self.application.stop())
-                loop.run_until_complete(self.application.shutdown())
-                loop.close()
+                self.application.stop()
             except:
                 pass
         self.is_running = False
@@ -309,7 +283,7 @@ class TelegramBot:
                 'expiry_time': now + timedelta(minutes=signal_times[0] + 2),
             }
             
-            # Send each alert
+            # Use application's bot to send messages (using a new loop)
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             for minutes in signal_times:
