@@ -13,7 +13,6 @@ class UserManager:
             first_name=first_name,
             invite_code=invite_code
         )
-        
         if success:
             logger.info(f"User auto-joined: {username}")
             return True, message
@@ -23,7 +22,6 @@ class UserManager:
     
     def generate_invite(self, bot_username, custom_code=None):
         invite_link, message = self.db.generate_invite_link(bot_username, custom_code)
-        
         if invite_link:
             logger.info(f"Invite link generated: {invite_link}")
             return invite_link, message
@@ -32,12 +30,10 @@ class UserManager:
             return None, message
     
     def get_users(self):
-        users = self.db.get_all_users()
-        return users
+        return self.db.get_all_users()  # Not implemented, but we don't need it
     
     def get_user_count(self):
-        count = self.db.get_user_count()
-        return count
+        return self.db.get_user_count()
     
     def is_user_allowed(self, telegram_id):
         user = self.db.get_user_by_telegram_id(telegram_id)
