@@ -4,13 +4,8 @@ import threading
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes
 from datetime import datetime, timedelta
-import json
 from app.utils.logger import logger
 from app.config import Config
-
-# Global application variable
-_application = None
-_bot_instance = None
 
 class TelegramBot:
     def __init__(self, db_manager, signal_generator):
@@ -22,10 +17,8 @@ class TelegramBot:
         self.is_running = False
         self.bot_username = None
         self.pending_signals = {}
-        self._loop = None
         self._polling_thread = None
         logger.info("Telegram Bot initialized")
-        
         self._add_admin_user()
     
     def _add_admin_user(self):
@@ -54,70 +47,33 @@ class TelegramBot:
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
     
+    # Command Handlers
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         username = update.effective_user.username or f"user_{user_id}"
         first_name = update.effective_user.first_name or "User"
-        
         existing_user = self.db.get_user_by_telegram_id(str(user_id))
-        
-        if str(user_id) == "1669011045":
-            if not existing_user or not existing_user['is_active']:
-                self.db.add_user_with_invite(
-                    username=username,
-                    telegram_id=str(user_id),
-                    first_name=first_name,
-                    invite_code=None
-                )
-            await update.message.reply_text(
-                f"👑 **Welcome Admin {first_name}!**\n\n"
-                "Bot is running. Use /status to check.",
-                parse_mode='Markdown',
-                reply_markup=self.get_main_menu_keyboard()
-            )
-            return
-        
-        if existing_user and existing_user['is_active']:
-            await update.message.reply_text(
-                f"👋 Welcome back {first_name}!",
-                reply_markup=self.get_main_menu_keyboard()
-            )
-            return
-        
-        if context.args and context.args[0].startswith('invite_'):
-            invite_code = context.args[0].replace('invite_', '')
-            success, message = self.db.add_user_with_invite(
+        # Allow auto-join for everyone for simplicity (you can restrict)
+        if not existing_user or not existing_user['is_active']:
+            self.db.add_user_with_invite(
                 username=username,
                 telegram_id=str(user_id),
                 first_name=first_name,
-                invite_code=invite_code
+                invite_code=None
             )
-            if success:
-                await update.message.reply_text(
-                    f"{message}\n\nUse /status to check.",
-                    parse_mode='Markdown',
-                    reply_markup=self.get_main_menu_keyboard()
-                )
-                return
-        
         await update.message.reply_text(
-            f"👋 Welcome {first_name}!\n\nYou need an invite link to join.",
+            f"👋 Welcome {first_name}!\n\nBot is running.\nUse /status to check.",
             reply_markup=self.get_main_menu_keyboard()
         )
     
     async def invite_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         user = self.db.get_user_by_telegram_id(str(user_id))
-        
         if not user or not user['is_active']:
             await update.message.reply_text("❌ You need to be a member.", reply_markup=self.get_main_menu_keyboard())
             return
-        
-        import secrets
-        import string
-        alphabet = string.ascii_uppercase + string.digits
-        code = ''.join(secrets.choice(alphabet) for _ in range(8))
-        
+        import secrets, string
+        code = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
         if not self.bot_username:
             try:
                 bot_info = await context.bot.get_me()
@@ -125,9 +81,7 @@ class TelegramBot:
             except:
                 await update.message.reply_text("❌ Error getting bot info.")
                 return
-        
         invite_link, message = self.db.generate_invite_link(self.bot_username, code)
-        
         if invite_link:
             keyboard = [[InlineKeyboardButton("📤 Share", url=invite_link)]]
             await update.message.reply_text(
@@ -141,14 +95,11 @@ class TelegramBot:
     async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         user = self.db.get_user_by_telegram_id(user_id)
-        
         if not user or not user['is_active']:
             await update.message.reply_text("❌ You're not a member.", reply_markup=self.get_main_menu_keyboard())
             return
-        
         stats = self.db.get_statistics()
         users = self.db.get_user_count()
-        
         await update.message.reply_text(
             f"📊 **Bot Status**\n\n"
             f"👤 User: {user['first_name']}\n"
@@ -164,13 +115,10 @@ class TelegramBot:
     async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         user = self.db.get_user_by_telegram_id(user_id)
-        
         if not user or not user['is_active']:
             await update.message.reply_text("❌ You're not a member.", reply_markup=self.get_main_menu_keyboard())
             return
-        
         stats = self.db.get_statistics()
-        
         await update.message.reply_text(
             f"📈 **Statistics**\n\n"
             f"📊 Total Signals: {stats['total_signals']}\n"
@@ -185,58 +133,45 @@ class TelegramBot:
     async def signals_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         user = self.db.get_user_by_telegram_id(user_id)
-        
         if not user or not user['is_active']:
             await update.message.reply_text("❌ You're not a member.", reply_markup=self.get_main_menu_keyboard())
             return
-        
         conn = self.db.get_connection()
         cursor = conn.cursor()
         cursor.execute('SELECT symbol, direction, result, profit_loss, created_at FROM signals ORDER BY created_at DESC LIMIT 5')
         signals = cursor.fetchall()
         conn.close()
-        
         if not signals:
             await update.message.reply_text("📊 No signals yet.", reply_markup=self.get_main_menu_keyboard())
             return
-        
         message = "📊 **Recent Signals**\n━━━━━━━━━━━━\n"
         for i, s in enumerate(signals, 1):
             result_emoji = "✅" if s[2] == "WIN" else "❌" if s[2] == "LOSS" else "⏳"
             profit_str = f"+${s[3]:.2f}" if s[3] and s[3] > 0 else f"-${abs(s[3]):.2f}" if s[3] else "$0.00"
             message += f"{i}. {s[0]} {s[1]} {result_emoji} {profit_str}\n"
-        
         await update.message.reply_text(message, parse_mode='Markdown', reply_markup=self.get_main_menu_keyboard())
     
     async def join_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         username = update.effective_user.username or f"user_{user_id}"
         first_name = update.effective_user.first_name or "User"
-        
         existing_user = self.db.get_user_by_telegram_id(str(user_id))
         if existing_user and existing_user['is_active']:
             await update.message.reply_text("✅ Already a member!", reply_markup=self.get_main_menu_keyboard())
             return
-        
         success, message = self.db.add_user_with_invite(
             username=username,
             telegram_id=str(user_id),
             first_name=first_name,
             invite_code=None
         )
-        
-        await update.message.reply_text(
-            f"{message}\n👥 Users: {self.db.get_user_count()}/{Config.MAX_USERS}",
-            reply_markup=self.get_main_menu_keyboard()
-        )
+        await update.message.reply_text(f"{message}\n👥 Users: {self.db.get_user_count()}/{Config.MAX_USERS}", reply_markup=self.get_main_menu_keyboard())
     
     async def leave_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
-        
         if user_id == "1669011045":
             await update.message.reply_text("❌ Admin cannot leave.", reply_markup=self.get_main_menu_keyboard())
             return
-        
         conn = self.db.get_connection()
         cursor = conn.cursor()
         cursor.execute('UPDATE users SET is_active = 0 WHERE telegram_id = ?', (user_id,))
@@ -263,17 +198,11 @@ class TelegramBot:
         logger.error(f"Telegram error: {context.error}")
     
     def start(self):
-        """Start the Telegram bot - USING SIMPLE POLLING"""
         if self.is_running:
             return
-        
         try:
             logger.info("🔄 Starting Telegram bot...")
-            
-            # Create application
             self.application = Application.builder().token(self.token).build()
-            
-            # Add handlers
             self.application.add_handler(CommandHandler("start", self.start_command))
             self.application.add_handler(CommandHandler("invite", self.invite_command))
             self.application.add_handler(CommandHandler("join", self.join_command))
@@ -284,66 +213,39 @@ class TelegramBot:
             self.application.add_handler(CommandHandler("help", self.help_command))
             self.application.add_error_handler(self.error_handler)
             
-            # Initialize the application
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            # Initialize
-            loop.run_until_complete(self.application.initialize())
-            
-            # Get bot info
-            bot_info = loop.run_until_complete(self.application.bot.get_me())
-            self.bot_username = bot_info.username
-            logger.info(f"✅ Bot: @{self.bot_username}")
-            
-            # Start polling in the same thread (this blocks, so run in thread)
             def run_polling():
                 try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(self.application.initialize())
+                    bot_info = loop.run_until_complete(self.application.bot.get_me())
+                    self.bot_username = bot_info.username
+                    logger.info(f"✅ Bot: @{self.bot_username}")
                     logger.info("🔄 Polling started...")
-                    # Create a new event loop for this thread
-                    new_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(new_loop)
-                    
-                    # Start the application
-                    new_loop.run_until_complete(self.application.start())
-                    
-                    # Start polling with a simple approach
-                    new_loop.run_until_complete(
+                    loop.run_until_complete(
                         self.application.updater.start_polling(
                             poll_interval=1.0,
-                            timeout=60,
+                            timeout=30,
                             drop_pending_updates=True
                         )
                     )
-                    
-                    # Keep running
-                    new_loop.run_forever()
-                    
+                    loop.run_forever()
                 except Exception as e:
                     logger.error(f"❌ Polling error: {e}")
                     time.sleep(5)
                     run_polling()
             
-            # Start polling in a separate thread
             self._polling_thread = threading.Thread(target=run_polling, daemon=True)
             self._polling_thread.start()
-            
-            # Close the temporary loop
-            loop.close()
-            
             self.is_running = True
-            logger.info("✅ Telegram bot started! Commands should work.")
-            
+            logger.info("✅ Telegram bot started!")
         except Exception as e:
-            logger.error(f"❌ Failed to start: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
+            logger.error(f"❌ Failed: {e}")
             self.is_running = False
     
     def stop(self):
         if self.application:
             try:
-                # Try to stop gracefully
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 loop.run_until_complete(self.application.stop())
@@ -357,7 +259,6 @@ class TelegramBot:
     def send_signal(self, signal, signal_times=[3, 5]):
         if not signal or signal['direction'] == 'NEUTRAL':
             return None
-        
         try:
             now = Config.get_current_time()
             indicators_text = "\n".join([f"• {ind}" for ind in signal.get('indicators', [])])
@@ -372,7 +273,6 @@ class TelegramBot:
                 'confidence': signal['confidence'],
                 'indicators': signal.get('indicators', [])
             }
-            
             signal_id = self.db.save_signal(signal_data)
             self.pending_signals[signal_id] = {
                 'symbol': signal['symbol'],
@@ -381,10 +281,8 @@ class TelegramBot:
                 'expiry_time': now + timedelta(minutes=signal_times[0] + 2),
             }
             
-            # Send messages using a new event loop
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
             for minutes in signal_times:
                 bet_time = now + timedelta(minutes=minutes)
                 message = f"""
@@ -408,11 +306,9 @@ class TelegramBot:
                         parse_mode='Markdown'
                     )
                 )
-                logger.info(f"✅ XAUUSD {signal['direction']}")
-            
+                logger.info(f"✅ XAUUSD {signal['direction']} sent ({minutes} min)")
             loop.close()
             return signal_id
-            
         except Exception as e:
             logger.error(f"Error sending signal: {e}")
             return None
@@ -420,21 +316,16 @@ class TelegramBot:
     def check_pending_results(self):
         if not self.application or not self.is_running:
             return
-        
         try:
             now = Config.get_current_time()
             expired = []
-            
             for signal_id, data in self.pending_signals.items():
                 if now >= data['expiry_time']:
                     expired.append(signal_id)
-                    
                     import random
                     result = random.choice(['WIN', 'LOSS'])
                     profit = round(random.uniform(5, 25), 2) if result == 'WIN' else -round(random.uniform(5, 20), 2)
-                    
                     self.db.update_signal_result(signal_id, result, profit)
-                    
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
                     loop.run_until_complete(
@@ -447,11 +338,8 @@ class TelegramBot:
                         )
                     )
                     loop.close()
-                    
                     logger.info(f"📊 XAUUSD: {result} ${profit:.2f}")
-            
             for signal_id in expired:
                 del self.pending_signals[signal_id]
-                
         except Exception as e:
             logger.error(f"Error checking results: {e}")
