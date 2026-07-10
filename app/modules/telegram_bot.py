@@ -8,6 +8,10 @@ import json
 from app.utils.logger import logger
 from app.config import Config
 
+# Global application variable
+_application = None
+_bot_instance = None
+
 class TelegramBot:
     def __init__(self, db_manager, signal_generator):
         self.token = Config.TELEGRAM_TOKEN
@@ -18,6 +22,8 @@ class TelegramBot:
         self.is_running = False
         self.bot_username = None
         self.pending_signals = {}
+        self._loop = None
+        self._polling_thread = None
         logger.info("Telegram Bot initialized")
         
         self._add_admin_user()
@@ -257,7 +263,7 @@ class TelegramBot:
         logger.error(f"Telegram error: {context.error}")
     
     def start(self):
-        """Start the Telegram bot - SIMPLIFIED"""
+        """Start the Telegram bot - USING SIMPLE POLLING"""
         if self.is_running:
             return
         
@@ -278,45 +284,71 @@ class TelegramBot:
             self.application.add_handler(CommandHandler("help", self.help_command))
             self.application.add_error_handler(self.error_handler)
             
+            # Initialize the application
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Initialize
+            loop.run_until_complete(self.application.initialize())
+            
             # Get bot info
-            def get_info():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                bot_info = loop.run_until_complete(self.application.bot.get_me())
-                self.bot_username = bot_info.username
-                loop.close()
-                logger.info(f"✅ Bot: @{self.bot_username}")
+            bot_info = loop.run_until_complete(self.application.bot.get_me())
+            self.bot_username = bot_info.username
+            logger.info(f"✅ Bot: @{self.bot_username}")
             
-            get_info()
-            
-            # Run polling - SIMPLE
-            def run():
+            # Start polling in the same thread (this blocks, so run in thread)
+            def run_polling():
                 try:
                     logger.info("🔄 Polling started...")
-                    self.application.run_polling(
-                        poll_interval=1.0,
-                        timeout=30,
-                        drop_pending_updates=True
+                    # Create a new event loop for this thread
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    
+                    # Start the application
+                    new_loop.run_until_complete(self.application.start())
+                    
+                    # Start polling with a simple approach
+                    new_loop.run_until_complete(
+                        self.application.updater.start_polling(
+                            poll_interval=1.0,
+                            timeout=60,
+                            drop_pending_updates=True
+                        )
                     )
+                    
+                    # Keep running
+                    new_loop.run_forever()
+                    
                 except Exception as e:
                     logger.error(f"❌ Polling error: {e}")
                     time.sleep(5)
-                    run()
+                    run_polling()
             
-            thread = threading.Thread(target=run, daemon=True)
-            thread.start()
+            # Start polling in a separate thread
+            self._polling_thread = threading.Thread(target=run_polling, daemon=True)
+            self._polling_thread.start()
+            
+            # Close the temporary loop
+            loop.close()
             
             self.is_running = True
-            logger.info("✅ Telegram bot started!")
+            logger.info("✅ Telegram bot started! Commands should work.")
             
         except Exception as e:
-            logger.error(f"❌ Failed: {e}")
+            logger.error(f"❌ Failed to start: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             self.is_running = False
     
     def stop(self):
         if self.application:
             try:
-                self.application.stop()
+                # Try to stop gracefully
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self.application.stop())
+                loop.run_until_complete(self.application.shutdown())
+                loop.close()
             except:
                 pass
         self.is_running = False
@@ -349,13 +381,13 @@ class TelegramBot:
                 'expiry_time': now + timedelta(minutes=signal_times[0] + 2),
             }
             
-            def send():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                for minutes in signal_times:
-                    bet_time = now + timedelta(minutes=minutes)
-                    message = f"""
+            # Send messages using a new event loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            for minutes in signal_times:
+                bet_time = now + timedelta(minutes=minutes)
+                message = f"""
 🎯 **XAUUSD Signal!** ({minutes} min)
 ━━━━━━━━━━━━━━━━━━
 📈 **Direction:** {signal['direction']}
@@ -369,18 +401,16 @@ class TelegramBot:
 
 🔔 Place {signal['direction']} at {bet_time.strftime('%H:%M:%S')}
 """
-                    loop.run_until_complete(
-                        self.application.bot.send_message(
-                            chat_id=self.chat_id,
-                            text=message,
-                            parse_mode='Markdown'
-                        )
+                loop.run_until_complete(
+                    self.application.bot.send_message(
+                        chat_id=self.chat_id,
+                        text=message,
+                        parse_mode='Markdown'
                     )
-                    logger.info(f"✅ Signal sent: XAUUSD {signal['direction']}")
-                
-                loop.close()
+                )
+                logger.info(f"✅ XAUUSD {signal['direction']}")
             
-            send()
+            loop.close()
             return signal_id
             
         except Exception as e:
@@ -405,21 +435,19 @@ class TelegramBot:
                     
                     self.db.update_signal_result(signal_id, result, profit)
                     
-                    def send_result():
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        loop.run_until_complete(
-                            self.application.bot.send_message(
-                                chat_id=self.chat_id,
-                                text=f"📊 **XAUUSD Result**\n\n"
-                                     f"{'✅' if result == 'WIN' else '❌'} {result}\n"
-                                     f"💵 Profit: ${profit:.2f}",
-                                parse_mode='Markdown'
-                            )
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(
+                        self.application.bot.send_message(
+                            chat_id=self.chat_id,
+                            text=f"📊 **XAUUSD Result**\n\n"
+                                 f"{'✅' if result == 'WIN' else '❌'} {result}\n"
+                                 f"💵 Profit: ${profit:.2f}",
+                            parse_mode='Markdown'
                         )
-                        loop.close()
+                    )
+                    loop.close()
                     
-                    send_result()
                     logger.info(f"📊 XAUUSD: {result} ${profit:.2f}")
             
             for signal_id in expired:
