@@ -19,7 +19,8 @@ from app.modules.user_manager import UserManager
 class SignalBot:
     def __init__(self):
         logger.info("=" * 60)
-        logger.info("🚀 XAUUSD Signal Bot")
+        logger.info("🚀 XAUUSD Signal Bot - FAST MODE")
+        logger.info("📊 Signals every 5-10 seconds")
         logger.info("=" * 60)
         
         try:
@@ -40,6 +41,7 @@ class SignalBot:
         
         logger.info(f"📊 XAUUSD Only")
         logger.info(f"👥 Max Users: {Config.MAX_USERS}")
+        logger.info(f"🎯 Min Confidence: {Config.MIN_CONFIDENCE}%")
     
     def start(self):
         if self.running:
@@ -55,7 +57,7 @@ class SignalBot:
         t.start()
         time.sleep(3)
         
-        # Start signal loop
+        # Start signal loop (FAST)
         t2 = threading.Thread(target=self._signal_loop, daemon=True)
         t2.start()
         
@@ -74,37 +76,43 @@ class SignalBot:
         logger.info("✅ Stopped")
     
     def _signal_loop(self):
-        logger.info("🔄 Signal loop - checking every 10 seconds...")
+        """FAST signal loop - every 5 seconds"""
+        logger.info("🔄 Signal loop - checking EVERY 5 SECONDS...")
         
         while self.running:
             try:
+                # Get fresh data
                 df = self.mt5.get_market_data('XAUUSD', Config.TIMEFRAME, 100)
                 
                 if df is not None and len(df) >= 50:
+                    # Generate signal
                     signal = self.signal_generator.generate_signal(df, 'XAUUSD')
                     
-                    if signal and signal['direction'] != 'NEUTRAL' and signal['confidence'] >= Config.MIN_CONFIDENCE:
-                        logger.info(f"🎯 XAUUSD {signal['direction']} ({signal['confidence']:.1f}%)")
-                        signal_id = self.telegram.send_signal(signal, Config.SIGNAL_TIMES)
-                        if signal_id:
-                            self.signals_sent += 1
-                            logger.info(f"✅ Sent! (Total: {self.signals_sent})")
+                    if signal and signal['direction'] != 'NEUTRAL':
+                        if signal['confidence'] >= Config.MIN_CONFIDENCE:
+                            logger.info(f"🎯 XAUUSD {signal['direction']} ({signal['confidence']:.1f}%)")
+                            signal_id = self.telegram.send_signal(signal, Config.SIGNAL_TIMES)
+                            if signal_id:
+                                self.signals_sent += 1
+                                logger.info(f"✅ Sent! (Total: {self.signals_sent})")
                 
-                time.sleep(10)
+                # Check every 5 seconds for FAST signals
+                time.sleep(5)
                 
             except Exception as e:
                 logger.error(f"Error: {e}")
-                time.sleep(5)
+                time.sleep(2)
     
     def _result_loop(self):
+        """Check results every 10 seconds"""
         logger.info("🔄 Result checker started")
         while self.running:
             try:
                 self.telegram.check_pending_results()
-                time.sleep(15)
+                time.sleep(10)
             except Exception as e:
                 logger.error(f"Result error: {e}")
-                time.sleep(15)
+                time.sleep(10)
     
     def _print_status(self):
         user_count = self.user_manager.get_user_count()
@@ -112,12 +120,13 @@ class SignalBot:
         
         logger.info(f"""
 ╔═══════════════════════════════════════════════════════════╗
-║              XAUUSD BOT - RUNNING                       ║
+║              XAUUSD BOT - FAST MODE                     ║
 ╠═══════════════════════════════════════════════════════════╣
 ║ 📊 Symbol: XAUUSD (Gold)                                 ║
 ║ 👥 Users: {user_count}/{Config.MAX_USERS}                                                ║
 ║ 📈 Signals Sent: {self.signals_sent}                                                ║
 ║ 🏆 Win Rate: {stats['win_rate']:.1f}%                                                 ║
+║ ⏱️ Check Interval: 5 seconds                               ║
 ╚═══════════════════════════════════════════════════════════╝
         """)
 
