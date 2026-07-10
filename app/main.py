@@ -26,8 +26,8 @@ bot_instance = None
 class SignalBot:
     def __init__(self):
         logger.info("=" * 60)
-        logger.info("🚀 XAUUSD Signal Bot - FINAL WORKING")
-        logger.info("📊 Signals every 10 seconds + Commands responsive")
+        logger.info("🚀 XAUUSD Signal Bot - ONE AT A TIME")
+        logger.info("📊 Signal → Wait for result → Next signal")
         logger.info("=" * 60)
         
         try:
@@ -45,7 +45,6 @@ class SignalBot:
         
         self.running = False
         self.signals_sent = 0
-        self.pending_results = {}
         
         logger.info(f"📊 XAUUSD Only")
         logger.info(f"👥 Max Users: {Config.MAX_USERS}")
@@ -77,12 +76,19 @@ class SignalBot:
         logger.info("✅ Stopped")
     
     async def _signal_loop(self):
-        """Force signals every 10 seconds"""
-        logger.info("🔄 Signal loop - sending every 10 seconds...")
+        """Send one signal, wait for result, then send next"""
+        logger.info("🔄 Signal loop - sending one signal at a time...")
         directions = ['CALL', 'PUT']
         idx = 0
         while self.running:
             try:
+                # Wait until there are no pending signals
+                while len(self.telegram.pending_signals) > 0 and self.running:
+                    logger.info(f"⏳ Waiting for previous signal result... ({len(self.telegram.pending_signals)} pending)")
+                    await asyncio.sleep(5)
+                if not self.running:
+                    break
+                
                 direction = directions[idx % 2]
                 idx += 1
                 # Create a dummy signal
@@ -99,7 +105,7 @@ class SignalBot:
                 if signal_id:
                     self.signals_sent += 1
                     logger.info(f"✅ Sent! (Total: {self.signals_sent})")
-                await asyncio.sleep(10)  # Wait 10 seconds
+                # After sending, loop will wait until pending_signals is empty
             except Exception as e:
                 logger.error(f"Error in signal loop: {e}")
                 await asyncio.sleep(5)
@@ -120,13 +126,13 @@ class SignalBot:
         stats = self.db.get_statistics()
         logger.info(f"""
 ╔═══════════════════════════════════════════════════════════╗
-║              XAUUSD BOT - WORKING                       ║
+║              XAUUSD BOT - ONE AT A TIME                 ║
 ╠═══════════════════════════════════════════════════════════╣
 ║ 📊 Symbol: XAUUSD (Gold)                                 ║
 ║ 👥 Users: {user_count}/{Config.MAX_USERS}                                                ║
 ║ 📈 Signals Sent: {self.signals_sent}                                                ║
 ║ 🏆 Win Rate: {stats['win_rate']:.1f}%                                                 ║
-║ ⏱️ Interval: 10 seconds                                  ║
+║ ⏱️ Mode: Signal → Result → Next Signal                    ║
 ╚═══════════════════════════════════════════════════════════╝
         """)
 
