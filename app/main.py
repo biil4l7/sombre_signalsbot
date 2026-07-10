@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 import os
 import sys
+import asyncio
 import time
 import signal
-import threading
-from datetime import datetime
+from datetime import datetime, timedelta
+import random
 
 # Ensure /app/data exists for database
 os.makedirs('/app/data', exist_ok=True)
@@ -19,11 +20,14 @@ from app.modules.mt5_connector import MT5Connector
 from app.modules.telegram_bot import TelegramBot
 from app.modules.user_manager import UserManager
 
+# Global references
+bot_instance = None
+
 class SignalBot:
     def __init__(self):
         logger.info("=" * 60)
-        logger.info("🚀 XAUUSD Signal Bot - FINAL")
-        logger.info("📊 Forced signals every 10 seconds")
+        logger.info("🚀 XAUUSD Signal Bot - FINAL WORKING")
+        logger.info("📊 Signals every 10 seconds + Commands responsive")
         logger.info("=" * 60)
         
         try:
@@ -41,123 +45,111 @@ class SignalBot:
         
         self.running = False
         self.signals_sent = 0
+        self.pending_results = {}
         
         logger.info(f"📊 XAUUSD Only")
         logger.info(f"👥 Max Users: {Config.MAX_USERS}")
         logger.info(f"🗄️ Database: {Config.DATABASE_PATH}")
     
-    def start(self):
-        if self.running:
-            return
-        logger.info("🟢 Starting...")
+    async def start(self):
+        """Start bot asynchronously"""
+        logger.info("🟢 Starting bot...")
         self.running = True
         self.mt5.connect()
         
-        # Start Telegram bot
-        t = threading.Thread(target=self.telegram.start, daemon=True)
-        t.start()
-        time.sleep(3)  # Give Telegram time to initialize
+        # Start Telegram bot (this will start polling and not block)
+        await self.telegram.start()
         
-        # Start signal loop (every 10 seconds)
-        t2 = threading.Thread(target=self._signal_loop, daemon=True)
-        t2.start()
+        # Start signal generation loop
+        asyncio.create_task(self._signal_loop())
         
         # Start result checker
-        t3 = threading.Thread(target=self._result_loop, daemon=True)
-        t3.start()
+        asyncio.create_task(self._result_loop())
         
         logger.info("✅ Bot started!")
         self._print_status()
     
-    def stop(self):
+    async def stop(self):
         logger.info("🔴 Stopping...")
         self.running = False
         self.mt5.disconnect()
-        self.telegram.stop()
+        await self.telegram.stop()
         logger.info("✅ Stopped")
     
-    def _signal_loop(self):
+    async def _signal_loop(self):
         """Force signals every 10 seconds"""
-        logger.info("🔄 Signal loop - sending forced signal every 10 seconds...")
+        logger.info("🔄 Signal loop - sending every 10 seconds...")
         directions = ['CALL', 'PUT']
         idx = 0
         while self.running:
             try:
                 direction = directions[idx % 2]
                 idx += 1
-                # Create a dummy signal with realistic data
+                # Create a dummy signal
                 signal = {
                     'symbol': 'XAUUSD',
                     'direction': direction,
-                    'confidence': 65.0 + (idx % 5) * 2,  # 65-75%
-                    'price': 2350.0 + (idx * 10),        # rising price
+                    'confidence': 65.0 + (idx % 5) * 2,
+                    'price': 2350.0 + (idx * 10),
                     'indicators': ['RSI Oversold' if direction == 'CALL' else 'RSI Overbought',
                                    'MA Bullish' if direction == 'CALL' else 'MA Bearish'],
-                    'score': 30 if direction == 'CALL' else -30
                 }
                 logger.info(f"🎯 FORCED XAUUSD {direction} (Confidence: {signal['confidence']:.1f}%)")
-                signal_id = self.telegram.send_signal(signal, Config.SIGNAL_TIMES)
+                signal_id = await self.telegram.send_signal(signal, Config.SIGNAL_TIMES)
                 if signal_id:
                     self.signals_sent += 1
                     logger.info(f"✅ Sent! (Total: {self.signals_sent})")
-                time.sleep(10)  # Wait 10 seconds before next signal
+                await asyncio.sleep(10)  # Wait 10 seconds
             except Exception as e:
                 logger.error(f"Error in signal loop: {e}")
-                time.sleep(5)
+                await asyncio.sleep(5)
     
-    def _result_loop(self):
+    async def _result_loop(self):
+        """Check expired signals and send results"""
         logger.info("🔄 Result checker started")
         while self.running:
             try:
-                self.telegram.check_pending_results()
-                time.sleep(10)
+                await self.telegram.check_pending_results()
+                await asyncio.sleep(10)
             except Exception as e:
                 logger.error(f"Result error: {e}")
-                time.sleep(10)
+                await asyncio.sleep(10)
     
     def _print_status(self):
         user_count = self.user_manager.get_user_count()
         stats = self.db.get_statistics()
         logger.info(f"""
 ╔═══════════════════════════════════════════════════════════╗
-║              XAUUSD BOT - FINAL                         ║
+║              XAUUSD BOT - WORKING                       ║
 ╠═══════════════════════════════════════════════════════════╣
 ║ 📊 Symbol: XAUUSD (Gold)                                 ║
 ║ 👥 Users: {user_count}/{Config.MAX_USERS}                                                ║
 ║ 📈 Signals Sent: {self.signals_sent}                                                ║
 ║ 🏆 Win Rate: {stats['win_rate']:.1f}%                                                 ║
 ║ ⏱️ Interval: 10 seconds                                  ║
-║ 🗄️ Database: {Config.DATABASE_PATH}                    ║
 ╚═══════════════════════════════════════════════════════════╝
         """)
 
+async def main():
+    global bot_instance
+    bot_instance = SignalBot()
+    await bot_instance.start()
+    # Keep running
+    try:
+        while True:
+            await asyncio.sleep(1)
+    except asyncio.CancelledError:
+        await bot_instance.stop()
+
 def signal_handler(sig, frame):
     logger.info("\n⚠️ Shutting down...")
-    if bot:
-        bot.stop()
+    if bot_instance:
+        asyncio.create_task(bot_instance.stop())
     sys.exit(0)
 
-bot = None
-
-def main():
-    global bot
-    try:
-        bot = SignalBot()
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
-        bot.start()
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        logger.info("👋 Stopped by user")
-        if bot:
-            bot.stop()
-        sys.exit(0)
-    except Exception as e:
-        logger.error(f"❌ Fatal: {e}")
-        if bot:
-            bot.stop()
-        sys.exit(1)
-
 if __name__ == "__main__":
-    main()
+    # Setup signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    # Run the async main
+    asyncio.run(main())
