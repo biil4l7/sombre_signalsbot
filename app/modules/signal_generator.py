@@ -6,10 +6,8 @@ from app.config import Config
 
 class SignalGenerator:
     def __init__(self):
-        self.signal_history = []
-        self.last_signal_time = {}
-        self.symbol_scores = {}  # Track scores per symbol
-        logger.info("Signal Generator initialized")
+        self.last_signal_time = None
+        logger.info("Signal Generator initialized - XAUUSD")
     
     def calculate_indicators(self, df):
         try:
@@ -71,34 +69,34 @@ class SignalGenerator:
             
             # MA Crossover
             if latest['MA5'] > latest['MA20'] and prev['MA5'] <= prev['MA20']:
-                score += 20
+                score += 25
                 indicators_triggered.append('MA Bullish Crossover')
             elif latest['MA5'] < latest['MA20'] and prev['MA5'] >= prev['MA20']:
-                score -= 20
+                score -= 25
                 indicators_triggered.append('MA Bearish Crossover')
             
             # RSI
             if latest['RSI'] < 30:
-                score += 15
+                score += 20
                 indicators_triggered.append('RSI Oversold')
             elif latest['RSI'] > 70:
-                score -= 15
+                score -= 20
                 indicators_triggered.append('RSI Overbought')
             
             # MACD
             if latest['MACD'] > latest['MACD_signal'] and prev['MACD'] <= prev['MACD_signal']:
-                score += 15
+                score += 20
                 indicators_triggered.append('MACD Bullish')
             elif latest['MACD'] < latest['MACD_signal'] and prev['MACD'] >= prev['MACD_signal']:
-                score -= 15
+                score -= 20
                 indicators_triggered.append('MACD Bearish')
             
             # Bollinger Bands
             if latest['close'] <= latest['BB_lower']:
-                score += 10
+                score += 15
                 indicators_triggered.append('At Lower Band')
             elif latest['close'] >= latest['BB_upper']:
-                score -= 10
+                score -= 15
                 indicators_triggered.append('At Upper Band')
             
             # Stochastic
@@ -120,22 +118,23 @@ class SignalGenerator:
             signal['score'] = score
             signal['indicators'] = indicators_triggered
             
-            if score > 20:
+            if score > 15:
                 signal['direction'] = 'CALL'
-                signal['confidence'] = min(95, 50 + abs(score) * 0.45)
-            elif score < -20:
+                signal['confidence'] = min(95, 55 + abs(score) * 0.4)
+            elif score < -15:
                 signal['direction'] = 'PUT'
-                signal['confidence'] = min(95, 50 + abs(score) * 0.45)
+                signal['confidence'] = min(95, 55 + abs(score) * 0.4)
             else:
                 signal['direction'] = 'NEUTRAL'
                 signal['confidence'] = 0
             
-            # Log if signal is valid
-            if signal['confidence'] >= Config.MIN_CONFIDENCE:
-                logger.info(f"📈 Signal: {symbol} - {signal['direction']} (Confidence: {signal['confidence']:.1f}%, Score: {score})")
+            # LOWER THRESHOLD for more signals
+            if signal['confidence'] >= 55:
+                logger.info(f"📈 XAUUSD: {signal['direction']} (Confidence: {signal['confidence']:.1f}%, Score: {score})")
+                return signal
             
-            return signal if signal['confidence'] >= Config.MIN_CONFIDENCE else None
+            return None
             
         except Exception as e:
-            logger.error(f"Error generating signal for {symbol}: {e}")
+            logger.error(f"Error generating signal: {e}")
             return None
