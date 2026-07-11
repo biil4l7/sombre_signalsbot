@@ -9,7 +9,6 @@ from app.utils.logger import logger
 class DatabaseManager:
     def __init__(self, db_path="data/signals.db"):
         self.db_path = db_path
-        # Ensure directory exists
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.init_database()
         logger.info(f"Database initialized at {db_path}")
@@ -285,6 +284,18 @@ class DatabaseManager:
         cursor.execute('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE telegram_id = ?', (telegram_id,))
         conn.commit()
         conn.close()
+    
+    def get_all_users(self):
+        """Get all active users with telegram_id"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT username, telegram_id, first_name, is_active
+            FROM users WHERE is_active = 1
+        ''')
+        users = cursor.fetchall()
+        conn.close()
+        return [{'username': u[0], 'telegram_id': u[1], 'first_name': u[2], 'is_active': u[3]} for u in users]
     
     def get_top_symbols(self, limit=3):
         conn = self.get_connection()
