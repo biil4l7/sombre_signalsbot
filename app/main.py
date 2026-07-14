@@ -5,7 +5,6 @@ import asyncio
 import time
 import signal
 from datetime import datetime, timedelta
-import random
 
 # Ensure /app/data exists for database
 os.makedirs('/app/data', exist_ok=True)
@@ -26,8 +25,8 @@ bot_instance = None
 class SignalBot:
     def __init__(self):
         logger.info("=" * 60)
-        logger.info("🚀 XAUUSD Signal Bot - ONE AT A TIME")
-        logger.info("📊 Signal → Wait for result → Next signal")
+        logger.info("🚀 XAUUSD Signal Bot - REAL DATA")
+        logger.info("📊 Signals generated from live market data")
         logger.info("=" * 60)
         
         try:
@@ -51,12 +50,11 @@ class SignalBot:
         logger.info(f"🗄️ Database: {Config.DATABASE_PATH}")
     
     async def start(self):
-        """Start bot asynchronously"""
         logger.info("🟢 Starting bot...")
         self.running = True
         self.mt5.connect()
         
-        # Start Telegram bot (this will start polling and not block)
+        # Start Telegram bot
         await self.telegram.start()
         
         # Start signal generation loop
@@ -76,42 +74,44 @@ class SignalBot:
         logger.info("✅ Stopped")
     
     async def _signal_loop(self):
-        """Send one signal, wait for result, then send next"""
-        logger.info("🔄 Signal loop - sending one signal at a time...")
-        directions = ['CALL', 'PUT']
-        idx = 0
+        """Generate signals from REAL market data"""
+        logger.info("🔄 Signal loop started - using real XAUUSD data...")
+        
         while self.running:
             try:
-                # Wait until there are no pending signals
+                # Wait until no pending signals (result sent)
                 while len(self.telegram.pending_signals) > 0 and self.running:
-                    logger.info(f"⏳ Waiting for previous signal result... ({len(self.telegram.pending_signals)} pending)")
                     await asyncio.sleep(5)
                 if not self.running:
                     break
                 
-                direction = directions[idx % 2]
-                idx += 1
-                # Create a dummy signal
-                signal = {
-                    'symbol': 'XAUUSD',
-                    'direction': direction,
-                    'confidence': 65.0 + (idx % 5) * 2,
-                    'price': 2350.0 + (idx * 10),
-                    'indicators': ['RSI Oversold' if direction == 'CALL' else 'RSI Overbought',
-                                   'MA Bullish' if direction == 'CALL' else 'MA Bearish'],
-                }
-                logger.info(f"🎯 FORCED XAUUSD {direction} (Confidence: {signal['confidence']:.1f}%)")
-                signal_id = await self.telegram.send_signal(signal, Config.SIGNAL_TIMES)
-                if signal_id:
-                    self.signals_sent += 1
-                    logger.info(f"✅ Sent! (Total: {self.signals_sent})")
-                # After sending, loop will wait until pending_signals is empty
+                # Fetch real market data
+                df = self.mt5.get_market_data('XAUUSD', Config.TIMEFRAME, 100)
+                
+                if df is None or len(df) < 50:
+                    logger.warning("Insufficient data, waiting...")
+                    await asyncio.sleep(30)
+                    continue
+                
+                # Generate signal using your signal generator
+                signal = self.signal_generator.generate_signal(df, 'XAUUSD')
+                
+                if signal and signal['direction'] != 'NEUTRAL':
+                    if signal['confidence'] >= Config.MIN_CONFIDENCE:
+                        logger.info(f"🎯 XAUUSD {signal['direction']} (Confidence: {signal['confidence']:.1f}%)")
+                        signal_id = await self.telegram.send_signal(signal, Config.SIGNAL_TIMES)
+                        if signal_id:
+                            self.signals_sent += 1
+                            logger.info(f"✅ Sent! (Total: {self.signals_sent})")
+                
+                # Wait before next check (30 seconds to avoid overloading)
+                await asyncio.sleep(30)
+                
             except Exception as e:
                 logger.error(f"Error in signal loop: {e}")
-                await asyncio.sleep(5)
+                await asyncio.sleep(30)
     
     async def _result_loop(self):
-        """Check expired signals and send results"""
         logger.info("🔄 Result checker started")
         while self.running:
             try:
@@ -126,13 +126,13 @@ class SignalBot:
         stats = self.db.get_statistics()
         logger.info(f"""
 ╔═══════════════════════════════════════════════════════════╗
-║              XAUUSD BOT - ONE AT A TIME                 ║
+║              XAUUSD BOT - REAL DATA                     ║
 ╠═══════════════════════════════════════════════════════════╣
-║ 📊 Symbol: XAUUSD (Gold)                                 ║
+║ 📊 Symbol: XAUUSD (Gold) - Real Prices                  ║
 ║ 👥 Users: {user_count}/{Config.MAX_USERS}                                                ║
 ║ 📈 Signals Sent: {self.signals_sent}                                                ║
 ║ 🏆 Win Rate: {stats['win_rate']:.1f}%                                                 ║
-║ ⏱️ Mode: Signal → Result → Next Signal                    ║
+║ ⏱️ Checking every 30 seconds                             ║
 ╚═══════════════════════════════════════════════════════════╝
         """)
 
@@ -140,7 +140,6 @@ async def main():
     global bot_instance
     bot_instance = SignalBot()
     await bot_instance.start()
-    # Keep running
     try:
         while True:
             await asyncio.sleep(1)
@@ -154,8 +153,6 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 if __name__ == "__main__":
-    # Setup signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    # Run the async main
     asyncio.run(main())
