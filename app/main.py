@@ -25,8 +25,8 @@ bot_instance = None
 class SignalBot:
     def __init__(self):
         logger.info("=" * 60)
-        logger.info("🚀 XAUUSD Signal Bot - REAL DATA")
-        logger.info("📊 Signals generated from live market data")
+        logger.info("🚀 XAUUSD Signal Bot - FORCED TEST MODE")
+        logger.info("📊 Forced signals every 30 seconds")
         logger.info("=" * 60)
         
         try:
@@ -42,7 +42,7 @@ class SignalBot:
         self.user_manager = UserManager(self.db)
         self.telegram = TelegramBot(self.db, self.signal_generator)
         
-        # ✅ PASS MT5 CONNECTOR TO TELEGRAM BOT (for price lookup)
+        # Pass MT5 connector to telegram bot for price lookup
         self.telegram.set_mt5_connector(self.mt5)
         
         self.running = False
@@ -60,7 +60,7 @@ class SignalBot:
         # Start Telegram bot
         await self.telegram.start()
         
-        # Start signal generation loop
+        # Start signal generation loop (FORCED)
         asyncio.create_task(self._signal_loop())
         
         # Start result checker
@@ -77,38 +77,39 @@ class SignalBot:
         logger.info("✅ Stopped")
     
     async def _signal_loop(self):
-        """Generate signals from REAL market data"""
-        logger.info("🔄 Signal loop started - using real XAUUSD data...")
+        """FORCED signals every 30 seconds - for testing Telegram delivery"""
+        logger.info("🔄 FORCED signal loop - sending every 30 seconds...")
+        directions = ['CALL', 'PUT']
+        idx = 0
         
         while self.running:
             try:
-                # Wait until no pending signals (result sent)
+                # Wait until no pending signals (so results are sent first)
                 while len(self.telegram.pending_signals) > 0 and self.running:
                     await asyncio.sleep(5)
                 if not self.running:
                     break
                 
-                # Fetch real market data
-                df = self.mt5.get_market_data('XAUUSD', Config.TIMEFRAME, 100)
+                direction = directions[idx % 2]
+                idx += 1
                 
-                if df is None or len(df) < 50:
-                    logger.warning("Insufficient data, waiting...")
-                    await asyncio.sleep(30)
-                    continue
+                # Create a dummy signal with realistic data
+                signal = {
+                    'symbol': 'XAUUSD',
+                    'direction': direction,
+                    'confidence': 65.0 + (idx % 5) * 2,
+                    'price': 2350.0 + (idx * 10),
+                    'indicators': ['RSI Oversold' if direction == 'CALL' else 'RSI Overbought',
+                                   'MA Bullish' if direction == 'CALL' else 'MA Bearish'],
+                }
                 
-                # Generate signal using your signal generator
-                signal = self.signal_generator.generate_signal(df, 'XAUUSD')
+                logger.info(f"🎯 FORCED XAUUSD {direction} (Confidence: {signal['confidence']:.1f}%)")
+                signal_id = await self.telegram.send_signal(signal, Config.SIGNAL_TIMES)
+                if signal_id:
+                    self.signals_sent += 1
+                    logger.info(f"✅ Sent! (Total: {self.signals_sent})")
                 
-                if signal and signal['direction'] != 'NEUTRAL':
-                    if signal['confidence'] >= Config.MIN_CONFIDENCE:
-                        logger.info(f"🎯 XAUUSD {signal['direction']} (Confidence: {signal['confidence']:.1f}%)")
-                        signal_id = await self.telegram.send_signal(signal, Config.SIGNAL_TIMES)
-                        if signal_id:
-                            self.signals_sent += 1
-                            logger.info(f"✅ Sent! (Total: {self.signals_sent})")
-                
-                # Wait before next check (30 seconds to avoid overloading)
-                await asyncio.sleep(30)
+                await asyncio.sleep(30)  # Wait 30 seconds before next forced signal
                 
             except Exception as e:
                 logger.error(f"Error in signal loop: {e}")
@@ -129,13 +130,13 @@ class SignalBot:
         stats = self.db.get_statistics()
         logger.info(f"""
 ╔═══════════════════════════════════════════════════════════╗
-║              XAUUSD BOT - REAL DATA                     ║
+║              XAUUSD BOT - FORCED TEST                   ║
 ╠═══════════════════════════════════════════════════════════╣
-║ 📊 Symbol: XAUUSD (Gold) - Real Prices                  ║
+║ 📊 Symbol: XAUUSD (Gold) - FORCED SIGNALS               ║
 ║ 👥 Users: {user_count}/{Config.MAX_USERS}                                                ║
 ║ 📈 Signals Sent: {self.signals_sent}                                                ║
 ║ 🏆 Win Rate: {stats['win_rate']:.1f}%                                                 ║
-║ ⏱️ Checking every 30 seconds                             ║
+║ ⏱️ Interval: 30 seconds (forced)                        ║
 ╚═══════════════════════════════════════════════════════════╝
         """)
 
