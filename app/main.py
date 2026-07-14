@@ -42,6 +42,9 @@ class SignalBot:
         self.user_manager = UserManager(self.db)
         self.telegram = TelegramBot(self.db, self.signal_generator)
         
+        # ✅ PASS MT5 CONNECTOR TO TELEGRAM BOT (for price lookup)
+        self.telegram.set_mt5_connector(self.mt5)
+        
         self.running = False
         self.signals_sent = 0
         
